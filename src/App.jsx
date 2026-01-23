@@ -3,6 +3,8 @@ import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { Login } from './pages/Login';
 import { Register } from './pages/Register';
 import { Dashboard } from './pages/Dashboard';
+import { IssueDetails } from './pages/IssueDetails';
+import { Settings } from './pages/Settings';
 
 // Защищенный маршрут
 function ProtectedRoute({ children }) {
@@ -50,6 +52,22 @@ function AppRoutes() {
         element={
           <ProtectedRoute>
             <Dashboard />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/issue/:issueKey"
+        element={
+          <ProtectedRoute>
+            <IssueDetails />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/settings"
+        element={
+          <ProtectedRoute>
+            <Settings />
           </ProtectedRoute>
         }
       />

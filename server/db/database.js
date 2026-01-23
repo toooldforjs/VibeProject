@@ -36,6 +36,28 @@ export async function initDatabase() {
     `);
 
     console.log('✅ Таблица users создана/проверена');
+
+    // Создаем таблицу настроек пользователя
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS user_settings (
+        id SERIAL PRIMARY KEY,
+        user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        project_tag VARCHAR(255),
+        jira_email VARCHAR(255),
+        jira_pat TEXT,
+        jira_base_url TEXT,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(user_id)
+      )
+    `);
+
+    // Создаем индекс для быстрого поиска по user_id
+    await pool.query(`
+      CREATE INDEX IF NOT EXISTS idx_user_settings_user_id ON user_settings(user_id)
+    `);
+
+    console.log('✅ Таблица user_settings создана/проверена');
   } catch (error) {
     console.error('❌ Ошибка инициализации базы данных:', error);
     throw error;

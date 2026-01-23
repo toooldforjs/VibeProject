@@ -138,3 +138,65 @@ PostgreSQL запускается в контейнере Podman на основ
 - Database: vibe_db
 
 Если вы меняете порт/пользователя/пароль в `docker-compose.yml`, не забудьте обновить файл `server/.env`.
+
+## Интеграция с Jira
+
+Приложение поддерживает проверку авторизации в Jira API с использованием Personal Access Token (PAT).
+
+### Настройка Jira API
+
+1. **Создайте Personal Access Token в Jira:**
+   - Перейдите в настройки вашего Jira профиля
+   - Найдите раздел "Personal Access Tokens" или "Токены доступа"
+   - Создайте новый токен и скопируйте его
+
+2. **Настройте переменные окружения:**
+   
+   Откройте файл `server/.env` и добавьте:
+   
+   ```env
+   JIRA_BASE_URL=https://your-domain.atlassian.net
+   JIRA_API_TOKEN=your-personal-access-token
+   JIRA_USE_PAT=true
+   ```
+   
+   **Важно:** При использовании PAT не требуется указывать `JIRA_EMAIL`.
+
+   **Замените:**
+   - `your-domain` на ваш домен Jira (например, `mycompany` или `tasks.sberdevices.ru`)
+   - `your-personal-access-token` на созданный токен
+
+3. **Использование:**
+   - Откройте дашборд в приложении
+   - Нажмите кнопку "Авторизоваться"
+   - На экране отобразится полный ответ от Jira API, включая статус авторизации и информацию о запросе
+
+### API Endpoints Jira
+
+#### GET /api/jira/auth
+Проверка авторизации в Jira API.
+
+**Ответ:**
+```json
+{
+  "request": {
+    "url": "https://...",
+    "method": "GET",
+    "authType": "Bearer (PAT)",
+    "headers": {...}
+  },
+  "response": {
+    "status": 200,
+    "statusText": "OK",
+    "contentType": "application/json",
+    "headers": {...}
+  },
+  "body": {
+    "self": "...",
+    "accountId": "...",
+    "displayName": "...",
+    ...
+  },
+  "rawBody": "..."
+}
+```

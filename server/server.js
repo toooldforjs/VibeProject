@@ -3,6 +3,8 @@ import cors from 'cors';
 import dotenv from 'dotenv';
 import { initDatabase } from './db/database.js';
 import authRoutes from './routes/auth.js';
+import jiraRoutes from './routes/jira.js';
+import settingsRoutes from './routes/settings.js';
 
 dotenv.config();
 
@@ -21,6 +23,8 @@ initDatabase().catch(console.error);
 
 // Routes
 app.use('/api/auth', authRoutes);
+app.use('/api/jira', jiraRoutes);
+app.use('/api/settings', settingsRoutes);
 
 // Health check
 app.get('/api/health', (req, res) => {
