@@ -17,6 +17,7 @@ import {
 } from '@mantine/core';
 import { useAuth } from '../contexts/AuthContext';
 import { notifications } from '@mantine/notifications';
+import { getStatusColor, getIssueTypeColor } from '../utils/statusColors';
 
 // Простые компоненты-заглушки для иконок
 const IconExternalLink = ({ size = 16 }) => <span style={{ fontSize: size }}>↗</span>;
@@ -163,15 +164,74 @@ export function IssueDetails() {
                     {issue.key}: {issue.summary}
                   </Title>
                   <Group gap="md">
-                    <Badge variant="light" color="violet" size="lg">
+                    <Badge 
+                      variant="light" 
+                      color={getIssueTypeColor(issue.issueType.name)} 
+                      size="lg"
+                      leftSection={
+                        issue.issueType.iconUrl ? (
+                          <img 
+                            src={issue.issueType.iconUrl} 
+                            alt={issue.issueType.name}
+                            style={{ width: 18, height: 18, marginRight: 6 }}
+                          />
+                        ) : null
+                      }
+                    >
                       {issue.issueType.name}
                     </Badge>
-                    <Badge variant="outline" size="lg">
+                    <Badge 
+                      variant="outline" 
+                      size="lg"
+                      color={getStatusColor(issue.issueType.name, issue.status.name)}
+                    >
                       {issue.status.name}
                     </Badge>
                     {issue.priority && (
                       <Badge variant="dot" size="lg">
                         {issue.priority.name}
+                      </Badge>
+                    )}
+                    {/* Родительская задача для подзадач */}
+                    {issue.parentKey && (
+                      <Badge
+                        variant="light"
+                        color={getIssueTypeColor(issue.parentType)}
+                        size="lg"
+                        style={{ cursor: 'pointer' }}
+                        onClick={() => navigate(`/issue/${issue.parentKey}`)}
+                        leftSection={
+                          issue.parentIconUrl ? (
+                            <img
+                              src={issue.parentIconUrl}
+                              alt={issue.parentType || 'Parent'}
+                              style={{ width: 18, height: 18, marginRight: 6 }}
+                            />
+                          ) : null
+                        }
+                      >
+                        Parent: {issue.parentKey}
+                      </Badge>
+                    )}
+                    {/* Родительский эпик для историй и задач */}
+                    {issue.epicKey && !issue.parentKey && (
+                      <Badge
+                        variant="light"
+                        color={getIssueTypeColor('Epic')}
+                        size="lg"
+                        style={{ cursor: 'pointer' }}
+                        onClick={() => navigate(`/issue/${issue.epicKey}`)}
+                        leftSection={
+                          issue.epicIconUrl ? (
+                            <img
+                              src={issue.epicIconUrl}
+                              alt="Epic"
+                              style={{ width: 18, height: 18, marginRight: 6 }}
+                            />
+                          ) : null
+                        }
+                      >
+                        Epic: {issue.epicKey}
                       </Badge>
                     )}
                   </Group>
@@ -303,6 +363,134 @@ export function IssueDetails() {
                   </Button>
                 </Anchor>
               </Group>
+
+              {/* Дочерние подзадачи */}
+              {issue.subtasks && issue.subtasks.length > 0 && (
+                <>
+                  <Divider />
+                  <Box>
+                    <Text size="sm" fw={600} mb="md">Дочерние подзадачи</Text>
+                    <Group gap="sm">
+                      {issue.subtasks.map((subtask) => (
+                        <Badge
+                          key={subtask.key}
+                          variant="light"
+                          color={getIssueTypeColor(subtask.issueType?.name || 'Sub-task')}
+                          size="lg"
+                          style={{ cursor: 'pointer' }}
+                          onClick={() => navigate(`/issue/${subtask.key}`)}
+                          leftSection={
+                            subtask.issueType?.iconUrl ? (
+                              <img
+                                src={subtask.issueType.iconUrl}
+                                alt={subtask.issueType.name || 'Sub-task'}
+                                style={{ width: 16, height: 16, marginRight: 6 }}
+                              />
+                            ) : null
+                          }
+                        >
+                          {subtask.key}: {subtask.summary}
+                        </Badge>
+                      ))}
+                    </Group>
+                  </Box>
+                </>
+              )}
+
+              {/* Задачи эпика */}
+              {issue.epicTasks && issue.epicTasks.length > 0 && (() => {
+                // Функция для получения порядка цвета статуса для сортировки (как на дашборде)
+                const getStatusColorOrder = (issueType, statusName) => {
+                  const color = getStatusColor(issueType, statusName);
+                  // Порядок: gray (0), blue (1), green (2), red (3)
+                  const colorOrder = { gray: 0, blue: 1, green: 2, red: 3 };
+                  return colorOrder[color] || 0;
+                };
+
+                // Функция для извлечения номера из ключа задачи
+                const getIssueNumber = (key) => {
+                  if (!key) return 0;
+                  const match = key.match(/-(\d+)$/);
+                  return match ? parseInt(match[1], 10) : 0;
+                };
+
+                // Сортируем задачи по цвету статуса (как на дашборде)
+                const sortedTasks = [...issue.epicTasks].sort((a, b) => {
+                  const colorOrderA = getStatusColorOrder(a.issueType?.name || '', a.status?.name || '');
+                  const colorOrderB = getStatusColorOrder(b.issueType?.name || '', b.status?.name || '');
+                  
+                  // Сначала по цвету статуса
+                  if (colorOrderA !== colorOrderB) {
+                    return colorOrderA - colorOrderB;
+                  }
+                  
+                  // Если цвета одинаковые, сортируем по номеру задачи
+                  return getIssueNumber(a.key) - getIssueNumber(b.key);
+                });
+
+                return (
+                  <>
+                    <Divider />
+                    <Box>
+                      <Text size="sm" fw={600} mb="md">Задачи эпика</Text>
+                      <Stack gap={0}>
+                        {sortedTasks.map((task) => (
+                          <Group
+                            key={task.key}
+                            justify="space-between"
+                            align="center"
+                            wrap="nowrap"
+                            p="xs"
+                            style={{
+                              cursor: 'pointer',
+                              borderRadius: '4px',
+                              transition: 'background-color 0.2s',
+                            }}
+                            onClick={() => navigate(`/issue/${task.key}`)}
+                            onMouseEnter={(e) => {
+                              e.currentTarget.style.backgroundColor = 'var(--mantine-color-gray-0)';
+                            }}
+                            onMouseLeave={(e) => {
+                              e.currentTarget.style.backgroundColor = 'transparent';
+                            }}
+                          >
+                            <Badge
+                              variant="light"
+                              color={getIssueTypeColor(task.issueType?.name || 'Task')}
+                              size="lg"
+                              style={{
+                                fontWeight: 'normal',
+                                textTransform: 'none',
+                              }}
+                              leftSection={
+                                task.issueType?.iconUrl ? (
+                                  <img
+                                    src={task.issueType.iconUrl}
+                                    alt={task.issueType.name || 'Task'}
+                                    style={{ width: 16, height: 16, marginRight: 6 }}
+                                  />
+                                ) : null
+                              }
+                            >
+                              {task.key}: {task.summary}
+                            </Badge>
+                            <Badge
+                              variant="light"
+                              color={getStatusColor(task.issueType?.name || 'Task', task.status?.name || 'Unknown')}
+                              size="lg"
+                              style={{
+                                fontWeight: 'normal',
+                              }}
+                            >
+                              {task.status?.name || 'Unknown'}
+                            </Badge>
+                          </Group>
+                        ))}
+                      </Stack>
+                    </Box>
+                  </>
+                );
+              })()}
             </Stack>
           ) : null}
         </Paper>

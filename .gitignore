@@ -22,3 +22,8 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# Сертификаты Минцифры
+server/certs/
+*.crt
+*.pem

@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { 
   Button, 
   Title, 
@@ -19,6 +19,7 @@ import {
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { notifications } from '@mantine/notifications';
+import { getStatusColor, getIssueTypeColor } from '../utils/statusColors';
 
 // Простые компоненты-заглушки для иконок
 const IconChevronDown = ({ size = 16 }) => <span style={{ fontSize: size }}>▼</span>;
@@ -34,6 +35,7 @@ export function Dashboard() {
   const [issuesError, setIssuesError] = useState(null);
   const [expandedEpics, setExpandedEpics] = useState(new Set());
   const [expandedTasks, setExpandedTasks] = useState(new Set());
+  const hasLoadedIssuesRef = useRef(false);
 
   useEffect(() => {
     if (!user) {
@@ -47,7 +49,9 @@ export function Dashboard() {
 
   useEffect(() => {
     // Автоматически загружаем задачи, если настройки заполнены
-    if (settings && areSettingsComplete(settings)) {
+    // Используем ref, чтобы предотвратить повторный вызов
+    if (settings && areSettingsComplete(settings) && !loadingIssues && !hasLoadedIssuesRef.current) {
+      hasLoadedIssuesRef.current = true;
       loadIssues();
     }
   }, [settings]);
@@ -101,6 +105,11 @@ export function Dashboard() {
 
   const loadIssues = async () => {
     if (!settings || !areSettingsComplete(settings)) {
+      return;
+    }
+
+    // Предотвращаем повторный вызов, если уже идет загрузка
+    if (loadingIssues) {
       return;
     }
 
@@ -272,22 +281,42 @@ export function Dashboard() {
       // Определяем родителя (для подзадач)
       const parentKey = fields.parent?.key || null;
       
-      // Определяем эпик через Epic Link (проверяем разные возможные поля)
+      // Определяем эпик через customfield_10000 (номер родительского эпика)
       let epicKey = null;
-      if (fields.epicLink) {
-        epicKey = typeof fields.epicLink === 'string' ? fields.epicLink : fields.epicLink.key;
-      } else if (fields.customfield_10011) { // Стандартное поле Epic Link в некоторых версиях Jira
-        epicKey = typeof fields.customfield_10011 === 'string' ? fields.customfield_10011 : fields.customfield_10011.key;
-      } else {
-        // Ищем в кастомных полях (проверяем все поля, которые могут содержать ключ эпика)
-        for (const [fieldKey, fieldValue] of Object.entries(fields)) {
-          if (fieldKey.toLowerCase().includes('epic') && fieldValue) {
-            if (typeof fieldValue === 'string' && fieldValue.match(/^[A-Z]+-\d+$/)) {
-              epicKey = fieldValue;
-              break;
-            } else if (fieldValue && typeof fieldValue === 'object' && fieldValue.key) {
-              epicKey = fieldValue.key;
-              break;
+      if (fields.customfield_10000) {
+        // customfield_10000 может быть строкой с ключом эпика или объектом с полем key
+        if (typeof fields.customfield_10000 === 'string') {
+          // Если это строка, проверяем, что это похоже на ключ задачи (например, EPIC-123)
+          if (fields.customfield_10000.match(/^[A-Z]+-\d+$/)) {
+            epicKey = fields.customfield_10000;
+          }
+        } else if (fields.customfield_10000 && typeof fields.customfield_10000 === 'object') {
+          // Если это объект, пытаемся получить key
+          epicKey = fields.customfield_10000.key || null;
+          // Если key нет, но есть значение, которое похоже на ключ
+          if (!epicKey && typeof fields.customfield_10000 === 'string') {
+            epicKey = fields.customfield_10000;
+          }
+        }
+      }
+      
+      // Fallback на другие поля, если customfield_10000 не найден
+      if (!epicKey) {
+        if (fields.epicLink) {
+          epicKey = typeof fields.epicLink === 'string' ? fields.epicLink : fields.epicLink.key;
+        } else if (fields.customfield_10011) { // Стандартное поле Epic Link в некоторых версиях Jira
+          epicKey = typeof fields.customfield_10011 === 'string' ? fields.customfield_10011 : fields.customfield_10011.key;
+        } else {
+          // Ищем в кастомных полях (проверяем все поля, которые могут содержать ключ эпика)
+          for (const [fieldKey, fieldValue] of Object.entries(fields)) {
+            if (fieldKey.toLowerCase().includes('epic') && fieldValue) {
+              if (typeof fieldValue === 'string' && fieldValue.match(/^[A-Z]+-\d+$/)) {
+                epicKey = fieldValue;
+                break;
+              } else if (fieldValue && typeof fieldValue === 'object' && fieldValue.key) {
+                epicKey = fieldValue.key;
+                break;
+              }
             }
           }
         }
@@ -313,6 +342,7 @@ export function Dashboard() {
     });
 
     // Функция для рекурсивного построения иерархии подзадач
+    // Подзадача определяется по наличию parentKey
     const buildSubtaskHierarchy = (parentKey, allIssues) => {
       return Array.from(allIssues.values())
         .filter(issue => issue.parentKey === parentKey)
@@ -322,45 +352,164 @@ export function Dashboard() {
         }));
     };
 
-    // Строим иерархию для эпиков: включаем задачи, связанные с эпиком
+    // Функция для построения иерархии историй и задач внутри эпика
+    const buildEpicChildren = (epicKey, allIssues) => {
+      return Array.from(allIssues.values())
+        .filter(issue => {
+          // Исключаем эпики
+          const isEpic = issue.issueType.name === 'Epic';
+          
+          // Включаем только истории и задачи (не эпики, не подзадачи), которые:
+          // 1. Не являются эпиками
+          // 2. Не являются подзадачами (не имеют родителя - parentKey)
+          // 3. Связаны с этим эпиком
+          return !isEpic && 
+                 !issue.parentKey && 
+                 issue.epicKey === epicKey;
+        })
+        .map(task => ({
+          ...task,
+          // Добавляем подзадачи к истории или задаче
+          children: buildSubtaskHierarchy(task.key, allIssues),
+        }));
+    };
+
+    // Строим иерархию для эпиков: включаем истории и задачи, связанные с эпиком
     const epics = Array.from(epicKeys)
       .map(epicKey => {
         const epic = issuesMap.get(epicKey);
         if (!epic) return null;
         
-        // Находим все задачи, связанные с этим эпиком
-        const epicTasks = Array.from(issuesMap.values())
-          .filter(issue => 
-            issue.issueType.name !== 'Epic' && 
-            issue.epicKey === epicKey &&
-            !issue.parentKey // Только задачи верхнего уровня (не подзадачи других задач)
-          )
-          .map(task => ({
-            ...task,
-            children: buildSubtaskHierarchy(task.key, issuesMap), // Добавляем подзадачи
-          }));
-        
         return {
           ...epic,
-          children: epicTasks,
+          children: buildEpicChildren(epicKey, issuesMap),
         };
       })
       .filter(epic => epic !== null);
 
-    // Находим задачи без эпиков и без родителей (standalone задачи)
+    // Находим истории и задачи без эпиков и без родителей (standalone задачи)
     const standaloneTasks = Array.from(issuesMap.values())
-      .filter(issue => 
-        issue.issueType.name !== 'Epic' && 
-        !issue.epicKey &&
-        !issue.parentKey &&
-        !epicKeys.has(issue.key)
-      )
+      .filter(issue => {
+        const isEpic = issue.issueType.name === 'Epic';
+        
+        // Включаем только истории и задачи, которые:
+        // 1. Не являются эпиками
+        // 2. Не являются подзадачами (не имеют родителя - parentKey)
+        // 3. Не связаны с эпиком
+        // 4. Не являются эпиками по ключу
+        return !isEpic && 
+               !issue.parentKey &&
+               !issue.epicKey &&
+               !epicKeys.has(issue.key);
+      })
       .map(task => ({
         ...task,
         children: buildSubtaskHierarchy(task.key, issuesMap),
       }));
 
-    return { epics, standaloneTasks };
+    // Функция для извлечения номера из ключа задачи (например, EPIC-123 -> 123)
+    const getIssueNumber = (key) => {
+      if (!key) return 0;
+      const match = key.match(/-(\d+)$/);
+      return match ? parseInt(match[1], 10) : 0;
+    };
+
+    // Функция для получения порядка цвета статуса для сортировки
+    const getStatusColorOrder = (issueType, statusName) => {
+      const color = getStatusColor(issueType, statusName);
+      // Порядок: gray (0), blue (1), green (2), red (3)
+      const colorOrder = { gray: 0, blue: 1, green: 2, red: 3 };
+      return colorOrder[color] || 0;
+    };
+
+    // Функция для сортировки задач по цвету статуса
+    const sortTasksByStatusColor = (tasks) => {
+      return [...tasks].sort((a, b) => {
+        const colorOrderA = getStatusColorOrder(a.issueType.name, a.status.name);
+        const colorOrderB = getStatusColorOrder(b.issueType.name, b.status.name);
+        
+        // Сначала по цвету статуса
+        if (colorOrderA !== colorOrderB) {
+          return colorOrderA - colorOrderB;
+        }
+        
+        // Если цвета одинаковые, сортируем по номеру задачи
+        return getIssueNumber(a.key) - getIssueNumber(b.key);
+      });
+    };
+
+    // Сортируем эпики по номеру
+    const sortedEpics = epics.sort((a, b) => {
+      return getIssueNumber(a.key) - getIssueNumber(b.key);
+    });
+
+    // Сортируем задачи внутри каждого эпика по цвету статуса
+    const sortedEpicsWithSortedTasks = sortedEpics.map(epic => ({
+      ...epic,
+      children: sortTasksByStatusColor(epic.children || []).map(task => ({
+        ...task,
+        // Рекурсивно сортируем подзадачи
+        children: sortTasksByStatusColor(task.children || []),
+      })),
+    }));
+
+    // Сортируем standalone задачи по цвету статуса
+    const sortedStandaloneTasks = sortTasksByStatusColor(standaloneTasks).map(task => ({
+      ...task,
+      // Рекурсивно сортируем подзадачи
+      children: sortTasksByStatusColor(task.children || []),
+    }));
+
+    return { epics: sortedEpicsWithSortedTasks, standaloneTasks: sortedStandaloneTasks };
+  };
+
+  // Функция для подсчета задач по типам
+  const countIssuesByType = (issues) => {
+    if (!issues) return { epics: 0, stories: 0, tasks: 0, subtasks: 0 };
+    
+    let epicsCount = 0;
+    let storiesCount = 0;
+    let tasksCount = 0;
+    let subtasksCount = 0;
+    
+    // Рекурсивная функция для подсчета задач в дереве
+    const countInTree = (items) => {
+      if (!items || !Array.isArray(items)) return;
+      
+      items.forEach(item => {
+        if (!item) return;
+        
+        const issueType = item.issueType?.name || '';
+        const normalizedType = issueType.toLowerCase().trim();
+        
+        if (normalizedType === 'epic') {
+          epicsCount++;
+        } else if (normalizedType === 'story') {
+          storiesCount++;
+        } else if (normalizedType === 'task') {
+          tasksCount++;
+        } else if (normalizedType === 'sub-task' || normalizedType === 'subtask' || normalizedType === 'подзадача') {
+          subtasksCount++;
+        }
+        
+        // Рекурсивно обрабатываем детей
+        if (item.children && Array.isArray(item.children) && item.children.length > 0) {
+          countInTree(item.children);
+        }
+      });
+    };
+    
+    // Подсчитываем эпики
+    if (issues.epics && Array.isArray(issues.epics) && issues.epics.length > 0) {
+      countInTree(issues.epics);
+    }
+    
+    // Подсчитываем standalone задачи
+    if (issues.standaloneTasks && Array.isArray(issues.standaloneTasks) && issues.standaloneTasks.length > 0) {
+      countInTree(issues.standaloneTasks);
+    }
+    
+    return { epics: epicsCount, stories: storiesCount, tasks: tasksCount, subtasks: subtasksCount };
   };
 
   const handleIssueClick = (issueKey) => {
@@ -389,7 +538,22 @@ export function Dashboard() {
 
   const renderIssueItem = (issue, level = 0) => {
     const isEpic = issue.issueType.name === 'Epic';
-    const hasChildren = issue.children && issue.children.length > 0;
+    const isSubtask = issue.issueType.name === 'Sub-task' || 
+                     issue.issueType.name === 'Subtask' ||
+                     issue.issueType.name.toLowerCase() === 'подзадача';
+    
+    // Для эпика показываем только прямые дети (истории и задачи), не подзадачи
+    // Для историй/задач показываем подзадачи
+    const directChildren = isEpic 
+      ? (issue.children || []).filter(child => {
+          const childIsSubtask = child.issueType.name === 'Sub-task' || 
+                                child.issueType.name === 'Subtask' ||
+                                child.issueType.name.toLowerCase() === 'подзадача';
+          return !childIsSubtask; // Показываем только истории и задачи, не подзадачи
+        })
+      : (issue.children || []); // Для историй/задач показываем все дети (подзадачи)
+    
+    const hasChildren = directChildren.length > 0;
     const isExpanded = isEpic ? expandedEpics.has(issue.key) : expandedTasks.has(issue.key);
     const indent = level * 20;
 
@@ -399,19 +563,27 @@ export function Dashboard() {
         style={{ 
           marginLeft: `${indent}px`, 
           marginBottom: '8px',
-          padding: '8px',
-          borderRadius: '4px',
-          transition: 'background-color 0.2s ease',
-        }}
-        onMouseEnter={(e) => {
-          e.currentTarget.style.backgroundColor = '#f8f9fa';
-        }}
-        onMouseLeave={(e) => {
-          e.currentTarget.style.backgroundColor = 'transparent';
         }}
       >
-        <Group gap="xs" align="flex-start" wrap="nowrap">
-          {hasChildren && (
+        <Group 
+          gap="xs" 
+          align="flex-start" 
+          wrap="nowrap"
+          p="xs"
+          style={{
+            borderRadius: '4px',
+            transition: 'background-color 0.2s ease',
+          }}
+          onMouseEnter={(e) => {
+            e.currentTarget.style.backgroundColor = '#f8f9fa';
+            e.stopPropagation();
+          }}
+          onMouseLeave={(e) => {
+            e.currentTarget.style.backgroundColor = 'transparent';
+            e.stopPropagation();
+          }}
+        >
+            {hasChildren && (
             <ActionIcon
               variant="subtle"
               size="sm"
@@ -424,9 +596,18 @@ export function Dashboard() {
           
           <Badge
             variant="light"
-            color={isEpic ? 'violet' : issue.issueType.name === 'Story' ? 'blue' : 'gray'}
+            color={getIssueTypeColor(issue.issueType.name)}
             style={{ cursor: 'pointer', minWidth: '80px' }}
             onClick={() => handleIssueClick(issue.key)}
+            leftSection={
+              issue.issueType.iconUrl ? (
+                <img 
+                  src={issue.issueType.iconUrl} 
+                  alt={issue.issueType.name}
+                  style={{ width: 16, height: 16, marginRight: 4 }}
+                />
+              ) : null
+            }
           >
             {issue.key}
           </Badge>
@@ -443,7 +624,11 @@ export function Dashboard() {
             {issue.summary}
           </Text>
           
-          <Badge variant="outline" size="sm">
+          <Badge 
+            variant="outline" 
+            size="sm"
+            color={getStatusColor(issue.issueType.name, issue.status.name)}
+          >
             {issue.status.name}
           </Badge>
         </Group>
@@ -451,7 +636,7 @@ export function Dashboard() {
         {hasChildren && (
           <Collapse in={isExpanded}>
             <Box style={{ marginTop: '8px', marginLeft: '32px' }}>
-              {issue.children.map(child => renderIssueItem(child, level + 1))}
+              {directChildren.map(child => renderIssueItem(child, level + 1))}
             </Box>
           </Collapse>
         )}
@@ -527,11 +712,9 @@ export function Dashboard() {
       </Box>
 
       {/* Основной контент */}
-      <Box style={{ marginTop: '70px', padding: '0', flex: 1, width: '100vw', maxWidth: '100%', marginLeft: 0, marginRight: 0, boxSizing: 'border-box' }}>
-        <Paper shadow="sm" p="md" radius="md" style={{ width: '100%', maxWidth: '100%', margin: 0 }}>
-          <Stack gap="md">
-            <Title order={3}>Задачи из Jira</Title>
-            
+      <Box style={{ marginTop: '70px', padding: '0', flex: 1, width: '100vw', maxWidth: '100%', marginLeft: 0, marginRight: 0, boxSizing: 'border-box', display: 'flex', flexDirection: 'column', minHeight: 0 }}>
+        <Paper shadow="sm" p="md" radius="md" style={{ width: '100%', maxWidth: '100%', margin: 0, flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
+          <Stack gap="md" style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
             {loadingSettings && (
               <Group justify="center" p="xl">
                 <Loader size="lg" />
@@ -603,40 +786,43 @@ export function Dashboard() {
               </Alert>
             )}
 
-            {issues && !loadingIssues && (
-              <Box>
-                <Text size="sm" c="dimmed" mb="md">
-                  Всего задач: {(issues.epics?.length || 0) + (issues.standaloneTasks?.length || 0)}
-                </Text>
+            {issues && !loadingIssues && (() => {
+              const counts = countIssuesByType(issues);
+              return (
+                <Box style={{ display: 'flex', flexDirection: 'column', height: '100%', flex: 1, minHeight: 0 }}>
+                  <Text size="sm" c="dimmed" mb="md" style={{ flexShrink: 0 }}>
+                    Epics: {counts.epics} Stories: {counts.stories} Tasks: {counts.tasks} Subtasks: {counts.subtasks}
+                  </Text>
 
-                <ScrollArea style={{ height: '600px' }}>
-                  <Stack gap="md">
-                    {/* Эпики с подзадачами */}
-                    {issues.epics && issues.epics.length > 0 && (
-                      <Box>
-                        <Title order={4} mb="sm">Эпики</Title>
-                        {issues.epics.map(epic => renderIssueItem(epic, 0))}
-                      </Box>
-                    )}
+                  <ScrollArea style={{ flex: 1, minHeight: 0 }}>
+                    <Stack gap="md">
+                      {/* Эпики с подзадачами */}
+                      {issues.epics && issues.epics.length > 0 && (
+                        <Box>
+                          <Title order={4} mb="sm">Эпики</Title>
+                          {issues.epics.map(epic => renderIssueItem(epic, 0))}
+                        </Box>
+                      )}
 
-                    {/* Отдельные задачи */}
-                    {issues.standaloneTasks && issues.standaloneTasks.length > 0 && (
-                      <Box>
-                        <Title order={4} mb="sm">Задачи</Title>
-                        {issues.standaloneTasks.map(task => renderIssueItem(task, 0))}
-                      </Box>
-                    )}
+                      {/* Отдельные задачи */}
+                      {issues.standaloneTasks && issues.standaloneTasks.length > 0 && (
+                        <Box>
+                          <Title order={4} mb="sm">Задачи</Title>
+                          {issues.standaloneTasks.map(task => renderIssueItem(task, 0))}
+                        </Box>
+                      )}
 
-                    {(!issues.epics || issues.epics.length === 0) && 
-                     (!issues.standaloneTasks || issues.standaloneTasks.length === 0) && (
-                      <Text c="dimmed" ta="center" p="xl">
-                        Задачи не найдены
-                      </Text>
-                    )}
-                  </Stack>
-                </ScrollArea>
-              </Box>
-            )}
+                      {(!issues.epics || issues.epics.length === 0) && 
+                       (!issues.standaloneTasks || issues.standaloneTasks.length === 0) && (
+                        <Text c="dimmed" ta="center" p="xl">
+                          Задачи не найдены
+                        </Text>
+                      )}
+                    </Stack>
+                  </ScrollArea>
+                </Box>
+              );
+            })()}
           </Stack>
         </Paper>
       </Box>

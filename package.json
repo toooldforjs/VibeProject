@@ -20,6 +20,7 @@
     "@mantine/modals": "^7.15.0",
     "@mantine/notifications": "^7.15.0",
     "@tabler/icons-react": "^3.36.1",
+    "gigachat": "^0.0.18",
     "react": "^19.2.0",
     "react-dom": "^19.2.0",
     "react-router-dom": "^7.1.3"
