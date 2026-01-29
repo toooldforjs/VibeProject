@@ -9,10 +9,11 @@ import {
   Button,
   Group,
   Text,
-  Alert,
   Avatar,
   Menu,
   Loader,
+  Divider,
+  Select,
 } from '@mantine/core';
 import { useAuth } from '../contexts/AuthContext';
 import { notifications } from '@mantine/notifications';
@@ -26,6 +27,10 @@ export function Settings() {
     projectTag: '',
     jiraPat: '',
     jiraBaseUrl: '',
+    gigachatCredentials: '',
+    gigachatScope: '',
+    gigachatModel: '',
+    gigachatTimeout: '',
   });
 
   useEffect(() => {
@@ -51,6 +56,10 @@ export function Settings() {
           projectTag: data.projectTag || '',
           jiraPat: data.jiraPat || '',
           jiraBaseUrl: data.jiraBaseUrl || '',
+          gigachatCredentials: data.gigachatCredentials || (data.gigachatCredentialsSet ? '••••••••••••' : ''),
+          gigachatScope: data.gigachatScope || '',
+          gigachatModel: data.gigachatModel || '',
+          gigachatTimeout: data.gigachatTimeout ?? '',
         });
       } else {
         notifications.show({
@@ -82,7 +91,13 @@ export function Settings() {
         },
         body: JSON.stringify({
           userId: user.id,
-          ...formData,
+          projectTag: formData.projectTag,
+          jiraPat: formData.jiraPat,
+          jiraBaseUrl: formData.jiraBaseUrl,
+          gigachatCredentials: formData.gigachatCredentials || undefined,
+          gigachatScope: formData.gigachatScope || undefined,
+          gigachatModel: formData.gigachatModel || undefined,
+          gigachatTimeout: formData.gigachatTimeout !== '' ? formData.gigachatTimeout : undefined,
         }),
       });
 
@@ -193,7 +208,7 @@ export function Settings() {
             <Title order={2}>Настройки</Title>
             
             <Text size="sm" c="dimmed">
-              Настройте параметры подключения к Jira для автоматической загрузки задач.
+              Настройте параметры подключения к Jira и GigaChat. Данные сохраняются в базу и используются при запросах (ключ GigaChat хранится в зашифрованном виде).
             </Text>
 
             {loading && (
@@ -229,6 +244,60 @@ export function Settings() {
               onChange={(e) => setFormData({ ...formData, jiraBaseUrl: e.target.value })}
               disabled={loading || saving}
               description="Базовый URL вашего Jira (например: https://your-company.atlassian.net)"
+            />
+
+            <Divider my="lg" />
+
+            <Title order={4}>GigaChat API</Title>
+            <Text size="sm" c="dimmed" mb="xs">
+              Ключ и параметры сохраняются в БД в зашифрованном виде и используются при запросах к GigaChat (Slop! и др.).
+            </Text>
+            <TextInput
+              label="Ключ авторизации (GIGACHAT_CREDENTIALS)"
+              placeholder="Введите ключ из личного кабинета Studio"
+              type="password"
+              value={formData.gigachatCredentials}
+              onChange={(e) => setFormData({ ...formData, gigachatCredentials: e.target.value })}
+              disabled={loading || saving}
+              description="Оставьте пустым или •••• чтобы не менять сохранённый ключ"
+            />
+            <Select
+              label="Версия API (GIGACHAT_SCOPE)"
+              placeholder="Выберите scope"
+              value={formData.gigachatScope || null}
+              onChange={(v) => setFormData({ ...formData, gigachatScope: v || '' })}
+              data={[
+                { value: 'GIGACHAT_API_PERS', label: 'GIGACHAT_API_PERS' },
+                { value: 'GIGACHAT_API_B2B', label: 'GIGACHAT_API_B2B' },
+                { value: 'GIGACHAT_API_CORP', label: 'GIGACHAT_API_CORP' },
+              ]}
+              disabled={loading || saving}
+              description="Тип доступа к API GigaChat"
+              allowDeselect
+              clearable
+            />
+            <Select
+              label="Модель (GIGACHAT_MODEL)"
+              placeholder="Выберите модель"
+              value={formData.gigachatModel || null}
+              onChange={(v) => setFormData({ ...formData, gigachatModel: v || '' })}
+              data={[
+                { value: 'GigaChat-2', label: 'GigaChat-2' },
+                { value: 'GigaChat-2-Pro', label: 'GigaChat-2-Pro' },
+                { value: 'GigaChat-2-Max', label: 'GigaChat-2-Max' },
+              ]}
+              disabled={loading || saving}
+              description="Модель GigaChat для запросов"
+              allowDeselect
+              clearable
+            />
+            <TextInput
+              label="Таймаут, сек (GIGACHAT_TIMEOUT)"
+              placeholder="600"
+              value={formData.gigachatTimeout}
+              onChange={(e) => setFormData({ ...formData, gigachatTimeout: e.target.value })}
+              disabled={loading || saving}
+              description="Таймаут подключения в секундах"
             />
 
             <Group justify="flex-end" mt="md">

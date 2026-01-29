@@ -57,6 +57,14 @@ export async function initDatabase() {
       CREATE INDEX IF NOT EXISTS idx_user_settings_user_id ON user_settings(user_id)
     `);
 
+    // Добавляем колонки GigaChat (если их ещё нет)
+    await pool.query(`
+      ALTER TABLE user_settings ADD COLUMN IF NOT EXISTS gigachat_credentials TEXT;
+      ALTER TABLE user_settings ADD COLUMN IF NOT EXISTS gigachat_scope VARCHAR(100);
+      ALTER TABLE user_settings ADD COLUMN IF NOT EXISTS gigachat_model VARCHAR(100);
+      ALTER TABLE user_settings ADD COLUMN IF NOT EXISTS gigachat_timeout INTEGER;
+    `);
+
     console.log('✅ Таблица user_settings создана/проверена');
   } catch (error) {
     console.error('❌ Ошибка инициализации базы данных:', error);

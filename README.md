@@ -139,37 +139,34 @@ PostgreSQL запускается в контейнере Podman на основ
 
 Если вы меняете порт/пользователя/пароль в `docker-compose.yml`, не забудьте обновить файл `server/.env`.
 
+## Шифрование настроек GigaChat
+
+Ключ GigaChat и параметры (scope, model, timeout) сохраняются в БД в зашифрованном виде. Для работы шифрования в `server/.env` задайте:
+
+```env
+ENCRYPTION_KEY=ваш-секретный-ключ-минимум-16-символов
+```
+
+Без `ENCRYPTION_KEY` сохранение настроек GigaChat в Настройках вернёт ошибку.
+
+## Переменные окружения (server/.env)
+
+Используются только следующие переменные (остальные в `.env` не читаются):
+
+| Переменная        | Описание |
+|-------------------|----------|
+| `DB_HOST`, `DB_PORT`, `DB_USER`, `DB_PASSWORD`, `DB_NAME` | Подключение к PostgreSQL |
+| `PORT`            | Порт сервера (по умолчанию 3001) |
+| `ENCRYPTION_KEY`  | Ключ шифрования для Jira PAT и GigaChat в БД (минимум 16 символов) |
+| `JIRA_API_VERSION` | Опционально: `3` для Jira Cloud API v3 |
+
+Переменные **JIRA_BASE_URL**, **JIRA_EMAIL**, **JIRA_API_TOKEN**, **JIRA_USE_PAT**, **GIGACHAT_CREDENTIALS**, **GIGACHAT_SCOPE**, **GIGACHAT_MODEL**, **GIGACHAT_TIMEOUT** в коде не используются — Jira и GigaChat настраиваются в приложении (страница Настройки), данные хранятся в БД в зашифрованном виде. Их можно удалить из `server/.env`.
+
+Пример минимального `server/.env` см. в `server/.env.example`.
+
 ## Интеграция с Jira
 
-Приложение поддерживает проверку авторизации в Jira API с использованием Personal Access Token (PAT).
-
-### Настройка Jira API
-
-1. **Создайте Personal Access Token в Jira:**
-   - Перейдите в настройки вашего Jira профиля
-   - Найдите раздел "Personal Access Tokens" или "Токены доступа"
-   - Создайте новый токен и скопируйте его
-
-2. **Настройте переменные окружения:**
-   
-   Откройте файл `server/.env` и добавьте:
-   
-   ```env
-   JIRA_BASE_URL=https://your-domain.atlassian.net
-   JIRA_API_TOKEN=your-personal-access-token
-   JIRA_USE_PAT=true
-   ```
-   
-   **Важно:** При использовании PAT не требуется указывать `JIRA_EMAIL`.
-
-   **Замените:**
-   - `your-domain` на ваш домен Jira (например, `mycompany` или `tasks.sberdevices.ru`)
-   - `your-personal-access-token` на созданный токен
-
-3. **Использование:**
-   - Откройте дашборд в приложении
-   - Нажмите кнопку "Авторизоваться"
-   - На экране отобразится полный ответ от Jira API, включая статус авторизации и информацию о запросе
+Jira настраивается в приложении: **Настройки** → тег проекта, PAT (Personal Access Token), Base URL. Данные сохраняются в БД в зашифрованном виде.
 
 ### API Endpoints Jira
 

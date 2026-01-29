@@ -1,10 +1,18 @@
 import express from 'express';
 import dotenv from 'dotenv';
 import pool from '../db/database.js';
+import { decrypt } from '../utils/encryption.js';
 
 dotenv.config();
 
 const router = express.Router();
+
+/** Расшифровывает jira_pat из БД (поддерживает старые незашифрованные значения) */
+const getDecryptedJiraPat = (stored) => {
+  if (!stored) return null;
+  const dec = decrypt(stored);
+  return dec ?? stored;
+};
 
 // Функция для создания авторизации для Jira API
 // Использует только Bearer токен через Personal Access Token (PAT)
@@ -52,7 +60,7 @@ router.get('/auth', async (req, res) => {
       if (settingsResult.rows.length > 0) {
         const settings = settingsResult.rows[0];
         baseUrl = normalizeBaseUrl(settings.jira_base_url);
-        jiraPat = settings.jira_pat;
+        jiraPat = getDecryptedJiraPat(settings.jira_pat);
       }
     } catch (dbError) {
       console.error('Ошибка получения настроек из БД:', dbError);
@@ -139,6 +147,82 @@ router.get('/auth', async (req, res) => {
   }
 });
 
+// Прокси для загрузки вложений/картинок из Jira (для отображения в описании задачи)
+router.get('/proxy', async (req, res) => {
+  try {
+    const userId = req.query.userId;
+    let targetUrl = req.query.url;
+
+    if (!userId || !targetUrl) {
+      return res.status(400).json({
+        error: 'Требуются параметры userId и url',
+      });
+    }
+
+    let baseUrl = null;
+    let jiraPat = null;
+    try {
+      const settingsResult = await pool.query(
+        'SELECT jira_base_url, jira_pat FROM user_settings WHERE user_id = $1',
+        [userId]
+      );
+      if (settingsResult.rows.length > 0) {
+        const settings = settingsResult.rows[0];
+        baseUrl = normalizeBaseUrl(settings.jira_base_url);
+        jiraPat = getDecryptedJiraPat(settings.jira_pat);
+      }
+    } catch (dbError) {
+      console.error('Ошибка получения настроек из БД:', dbError);
+      return res.status(500).json({ error: 'Ошибка получения настроек' });
+    }
+
+    if (!baseUrl || !jiraPat) {
+      return res.status(400).json({ error: 'Jira не настроен' });
+    }
+
+    try {
+      targetUrl = decodeURIComponent(targetUrl);
+    } catch (e) {
+      return res.status(400).json({ error: 'Некорректный url' });
+    }
+
+    if (targetUrl.startsWith('/')) {
+      targetUrl = baseUrl + targetUrl;
+    }
+
+    if (!targetUrl.startsWith(baseUrl)) {
+      return res.status(400).json({ error: 'Разрешены только ссылки на Jira' });
+    }
+
+    const authHeader = getAuthHeader(jiraPat);
+    const proxyResponse = await fetch(targetUrl, {
+      method: 'GET',
+      headers: {
+        Authorization: authHeader,
+        Accept: 'image/*,*/*',
+      },
+    });
+
+    if (!proxyResponse.ok) {
+      return res.status(proxyResponse.status).json({
+        error: 'Не удалось загрузить ресурс',
+        status: proxyResponse.status,
+      });
+    }
+
+    const contentType = proxyResponse.headers.get('content-type') || 'application/octet-stream';
+    res.set('Content-Type', contentType);
+    const buffer = await proxyResponse.arrayBuffer();
+    res.send(Buffer.from(buffer));
+  } catch (error) {
+    console.error('Jira proxy error:', error);
+    res.status(500).json({
+      error: 'Ошибка прокси',
+      message: error.message,
+    });
+  }
+});
+
 // Получение задач проекта
 router.get('/issues', async (req, res) => {
   try {
@@ -173,7 +257,7 @@ router.get('/issues', async (req, res) => {
       if (settingsResult.rows.length > 0) {
         const settings = settingsResult.rows[0];
         baseUrl = normalizeBaseUrl(settings.jira_base_url);
-        jiraPat = settings.jira_pat;
+        jiraPat = getDecryptedJiraPat(settings.jira_pat);
       }
     } catch (dbError) {
       console.error('Ошибка получения настроек из БД:', dbError);
@@ -367,7 +451,7 @@ router.get('/issue/:issueKey', async (req, res) => {
       if (settingsResult.rows.length > 0) {
         const settings = settingsResult.rows[0];
         baseUrl = normalizeBaseUrl(settings.jira_base_url);
-        jiraPat = settings.jira_pat;
+        jiraPat = getDecryptedJiraPat(settings.jira_pat);
       }
     } catch (dbError) {
       console.error('Ошибка получения настроек из БД:', dbError);
@@ -587,6 +671,7 @@ router.get('/issue/:issueKey', async (req, res) => {
       attachments: fileLinks,
       subtasks: subtaskLinks,
       url: `${baseUrl}/browse/${issue.key}`,
+      jiraBaseUrl: baseUrl,
     };
 
     // Если это эпик, получаем вложенные задачи
@@ -656,6 +741,127 @@ router.get('/issue/:issueKey', async (req, res) => {
     res.status(500).json({
       error: 'Failed to fetch Jira issue',
       message: error.message
+    });
+  }
+});
+
+// Получение задач эпика
+router.get('/epic/:epicKey/tasks', async (req, res) => {
+  try {
+    const { epicKey } = req.params;
+    const userId = req.query.userId;
+
+    if (!userId) {
+      return res.status(400).json({
+        error: 'User ID is required. Please provide userId query parameter.'
+      });
+    }
+
+    // Получаем настройки пользователя из базы данных
+    let baseUrl = null;
+    let jiraPat = null;
+
+    try {
+      const settingsResult = await pool.query(
+        'SELECT jira_base_url, jira_pat FROM user_settings WHERE user_id = $1',
+        [userId]
+      );
+
+      if (settingsResult.rows.length > 0) {
+        const settings = settingsResult.rows[0];
+        baseUrl = normalizeBaseUrl(settings.jira_base_url);
+        jiraPat = getDecryptedJiraPat(settings.jira_pat);
+      }
+    } catch (dbError) {
+      console.error('Ошибка получения настроек из БД:', dbError);
+      return res.status(500).json({
+        error: 'Ошибка получения настроек из базы данных',
+        message: dbError.message,
+      });
+    }
+
+    if (!baseUrl || !jiraPat) {
+      return res.status(400).json({
+        error: 'Jira credentials not configured. Please configure settings in the Settings page.'
+      });
+    }
+
+    // Извлекаем project key из ключа эпика
+    const projectKey = epicKey.split('-')[0];
+
+    // Используем JQL для поиска задач, связанных с этим эпиком через "Epic Link"
+    const jql = `project = ${projectKey} AND "Epic Link" = ${epicKey} ORDER BY summary ASC`;
+    const searchUrl = `${baseUrl}/rest/api/2/search`;
+
+    let authHeader;
+    try {
+      authHeader = getAuthHeader(jiraPat);
+    } catch (authError) {
+      console.error('Ошибка создания заголовка авторизации:', authError);
+      return res.status(400).json({
+        error: 'Ошибка создания заголовка авторизации',
+        message: authError.message,
+      });
+    }
+
+    const searchResponse = await fetch(searchUrl, {
+      method: 'POST',
+      headers: {
+        'Authorization': authHeader,
+        'Accept': 'application/json',
+        'Content-Type': 'application/json',
+        'X-Atlassian-Token': 'no-check',
+      },
+      body: JSON.stringify({
+        jql: jql,
+        maxResults: 100,
+        fields: ['key', 'summary', 'description', 'issuetype', 'status'],
+      }),
+    });
+
+    if (!searchResponse.ok) {
+      const errorText = await searchResponse.text();
+      console.error('Ошибка получения задач эпика:', searchResponse.status, errorText);
+      return res.status(searchResponse.status).json({
+        error: 'Ошибка получения задач эпика',
+        details: errorText,
+        statusCode: searchResponse.status,
+      });
+    }
+
+    const searchData = await searchResponse.json();
+    if (searchData.issues && Array.isArray(searchData.issues)) {
+      const tasks = searchData.issues
+        .filter(task => task.key !== epicKey) // Исключаем сам эпик
+        .map(task => ({
+          key: task.key,
+          summary: task.fields?.summary || '',
+          description: task.fields?.description || '',
+          issueType: {
+            name: task.fields?.issuetype?.name || 'Unknown',
+          },
+          status: {
+            name: task.fields?.status?.name || 'Unknown',
+          },
+        }));
+
+      res.json({
+        success: true,
+        epicKey: epicKey,
+        tasks: tasks,
+      });
+    } else {
+      res.json({
+        success: true,
+        epicKey: epicKey,
+        tasks: [],
+      });
+    }
+  } catch (error) {
+    console.error('Ошибка получения задач эпика:', error);
+    res.status(500).json({
+      error: 'Ошибка получения задач эпика',
+      message: error.message,
     });
   }
 });

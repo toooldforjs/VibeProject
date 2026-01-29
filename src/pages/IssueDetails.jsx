@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef, useMemo } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { 
   Button, 
@@ -14,6 +14,8 @@ import {
   Avatar,
   Anchor,
   Menu,
+  Modal,
+  ScrollArea,
 } from '@mantine/core';
 import { useAuth } from '../contexts/AuthContext';
 import { notifications } from '@mantine/notifications';
@@ -23,6 +25,27 @@ import { getStatusColor, getIssueTypeColor } from '../utils/statusColors';
 const IconExternalLink = ({ size = 16 }) => <span style={{ fontSize: size }}>↗</span>;
 const IconFile = ({ size = 16 }) => <span style={{ fontSize: size }}>📄</span>;
 
+const API_BASE = 'http://localhost:3001';
+
+/** Переписывает img src в HTML описания на прокси-URL для загрузки с авторизацией Jira */
+function rewriteDescriptionHtmlImages(html, jiraBaseUrl, userId) {
+  if (!html || !jiraBaseUrl || !userId) return html;
+  const base = (jiraBaseUrl || '').replace(/\/+$/, '');
+  return html.replace(/<img([^>]*)\ssrc="([^"]+)"([^>]*)>/gi, (full, before, src, after) => {
+    let url = src.trim();
+    if (url.startsWith('/')) {
+      url = base + url;
+    } else if (!url.startsWith('http')) {
+      return full;
+    }
+    if (url.startsWith(base)) {
+      const proxySrc = `${API_BASE}/api/jira/proxy?url=${encodeURIComponent(url)}&userId=${encodeURIComponent(userId)}`;
+      return `<img${before} src="${proxySrc}" data-full-src="${proxySrc}" data-inline-image="true"${after}>`;
+    }
+    return full;
+  });
+}
+
 export function IssueDetails() {
   const { issueKey } = useParams();
   const navigate = useNavigate();
@@ -30,12 +53,150 @@ export function IssueDetails() {
   const [issue, setIssue] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const [slopModalOpened, setSlopModalOpened] = useState(false);
+  const [slopResponse, setSlopResponse] = useState('');
+  const [slopLoading, setSlopLoading] = useState(false);
+  const [imageModalOpened, setImageModalOpened] = useState(false);
+  const [imageModalSrc, setImageModalSrc] = useState('');
+  const descriptionRef = useRef(null);
 
   useEffect(() => {
     if (issueKey) {
       fetchIssueDetails(issueKey);
     }
   }, [issueKey]);
+
+  const descriptionHtmlWithImages = useMemo(() => {
+    if (!issue?.descriptionHtml) return '';
+    return rewriteDescriptionHtmlImages(issue.descriptionHtml, issue.jiraBaseUrl, user?.id);
+  }, [issue?.descriptionHtml, issue?.jiraBaseUrl, user?.id]);
+
+  useEffect(() => {
+    const el = descriptionRef.current;
+    if (!el) return;
+    const onDescClick = (e) => {
+      const img = e.target.closest?.('img[data-inline-image="true"]') || (e.target.tagName === 'IMG' && e.target.dataset?.inlineImage === 'true' ? e.target : null);
+      if (img) {
+        e.preventDefault();
+        const src = img.dataset?.fullSrc || img.src;
+        if (src) {
+          setImageModalSrc(src);
+          setImageModalOpened(true);
+        }
+      }
+    };
+    el.addEventListener('click', onDescClick);
+    return () => el.removeEventListener('click', onDescClick);
+  }, [descriptionHtmlWithImages]);
+
+  const handleSlopClick = async () => {
+    if (!issue || !user) {
+      notifications.show({
+        title: 'Ошибка',
+        message: 'Данные задачи не загружены',
+        color: 'red',
+      });
+      return;
+    }
+
+    setSlopLoading(true);
+    setSlopModalOpened(true);
+    setSlopResponse('Загрузка данных эпика и генерация ответа...');
+
+    try {
+      // Определяем ключ эпика
+      let epicKey = null;
+      let epicData = null;
+
+      if (issue.issueType?.name?.toLowerCase() === 'epic') {
+        epicKey = issue.key;
+        epicData = {
+          key: issue.key,
+          summary: issue.summary,
+          description: issue.description || '',
+          issueType: issue.issueType,
+        };
+      } else if (issue.epicKey) {
+        epicKey = issue.epicKey;
+        try {
+          const epicResponse = await fetch(
+            `http://localhost:3001/api/jira/issue/${epicKey}?userId=${user.id}`
+          );
+          const epicResponseData = await epicResponse.json();
+          if (epicResponse.ok) {
+            epicData = {
+              key: epicResponseData.key,
+              summary: epicResponseData.summary,
+              description: epicResponseData.description || '',
+              issueType: epicResponseData.issueType,
+            };
+          }
+        } catch (epicErr) {
+          console.warn('Не удалось получить данные эпика:', epicErr);
+        }
+      }
+
+      if (!epicKey) {
+        setSlopResponse('Ошибка: Задача не связана с эпиком. Функция "Slop!" доступна только для задач в эпиках.');
+        setSlopLoading(false);
+        return;
+      }
+
+      const epicTasksResponse = await fetch(
+        `http://localhost:3001/api/jira/epic/${epicKey}/tasks?userId=${user.id}`
+      );
+      const epicTasksData = await epicTasksResponse.json();
+
+      if (!epicTasksResponse.ok) {
+        throw new Error(epicTasksData.error || 'Ошибка получения задач эпика');
+      }
+
+      const tasks = epicTasksData.tasks || [];
+
+      let systemPrompt = 'Ты senior-level системный аналитик. В запросе пользователя тебе будет передано название и описание задачи на разработку. Используй название и описание всех задач этого эпика чтобы сформулировать свои предложения по написанию текста задачи или составлению его с нуля.\n';
+
+      if (epicData) {
+        systemPrompt += `${epicData.issueType.name} ${epicData.key} ${epicData.summary} ${epicData.description}\n`;
+      }
+
+      tasks.forEach((task) => {
+        systemPrompt += `${task.issueType.name} ${task.key} ${task.summary} ${task.description || ''}\n`;
+      });
+
+      const userMessage = `Название задачи: ${issue.summary}. Описание задачи: ${issue.description || 'Описание отсутствует'}`;
+
+      const gigachatResponse = await fetch('http://localhost:3001/api/gigachat/slop', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          userId: user.id,
+          systemPrompt,
+          userMessage,
+          model: 'GigaChat-2',
+        }),
+      });
+
+      const gigachatData = await gigachatResponse.json();
+
+      if (!gigachatResponse.ok) {
+        throw new Error(gigachatData.error || 'Ошибка генерации ответа');
+      }
+
+      setSlopResponse(gigachatData.response || 'Ответ не получен');
+    } catch (err) {
+      console.error('Ошибка при вызове Slop!:', err);
+      setSlopResponse(`Ошибка: ${err.message}`);
+      notifications.show({
+        title: 'Ошибка',
+        message: err.message,
+        color: 'red',
+      });
+    } finally {
+      setSlopLoading(false);
+    }
+  };
 
   const fetchIssueDetails = async (key) => {
     setLoading(true);
@@ -306,13 +467,18 @@ export function IssueDetails() {
                 <Text size="sm" fw={600} mb={4}>Описание</Text>
                 {issue.descriptionHtml ? (
                   <Box
-                    dangerouslySetInnerHTML={{ __html: issue.descriptionHtml }}
+                    ref={descriptionRef}
+                    component="div"
+                    dangerouslySetInnerHTML={{
+                      __html: descriptionHtmlWithImages || issue.descriptionHtml,
+                    }}
                     style={{
                       border: '1px solid #e9ecef',
                       borderRadius: '4px',
                       padding: '12px',
                       backgroundColor: '#f8f9fa',
                     }}
+                    className="issue-description-content"
                   />
                 ) : issue.description ? (
                   <Text size="sm" style={{ whiteSpace: 'pre-wrap' }}>
@@ -353,6 +519,19 @@ export function IssueDetails() {
               <Divider />
 
               <Group justify="flex-end">
+                <Button
+                  variant="filled"
+                  color="violet"
+                  onClick={handleSlopClick}
+                  loading={slopLoading}
+                  leftSection={
+                    <Text fw={700} size="lg" style={{ lineHeight: 1 }}>
+                      AI
+                    </Text>
+                  }
+                >
+                  Slop!
+                </Button>
                 <Anchor
                   href={issue.url}
                   target="_blank"
@@ -495,6 +674,55 @@ export function IssueDetails() {
           ) : null}
         </Paper>
       </Box>
+
+      {/* Модальное окно для ответа GigaChat */}
+      <Modal
+        opened={slopModalOpened}
+        onClose={() => setSlopModalOpened(false)}
+        title="Ответ GigaChat"
+        size="xl"
+        centered
+        zIndex={1000}
+      >
+        <ScrollArea style={{ height: 400 }}>
+          <Text size="sm" style={{ whiteSpace: 'pre-wrap' }}>
+            {slopResponse || 'Загрузка...'}
+          </Text>
+        </ScrollArea>
+        <Group justify="flex-end" mt="md">
+          <Button onClick={() => setSlopModalOpened(false)}>
+            Закрыть
+          </Button>
+        </Group>
+      </Modal>
+
+      {/* Модальное окно просмотра изображения из описания */}
+      <Modal
+        opened={imageModalOpened}
+        onClose={() => setImageModalOpened(false)}
+        withCloseButton
+        size="auto"
+        centered
+        zIndex={1001}
+        padding={0}
+        styles={{
+          body: { maxWidth: '95vw', maxHeight: '95vh', display: 'flex', alignItems: 'center', justifyContent: 'center' },
+          content: { overflow: 'hidden' },
+        }}
+      >
+        {imageModalSrc ? (
+          <img
+            src={imageModalSrc}
+            alt="Просмотр"
+            style={{
+              maxWidth: '95vw',
+              maxHeight: '95vh',
+              objectFit: 'contain',
+              display: 'block',
+            }}
+          />
+        ) : null}
+      </Modal>
     </Box>
   );
 }
