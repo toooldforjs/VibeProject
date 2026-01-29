@@ -1,5 +1,7 @@
 import { useState, useEffect, useRef, useMemo } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 import { 
   Button, 
   Title, 
@@ -101,69 +103,73 @@ export function IssueDetails() {
 
     setSlopLoading(true);
     setSlopModalOpened(true);
-    setSlopResponse('Загрузка данных эпика и генерация ответа...');
+    setSlopResponse('Загрузка данных и генерация ответа...');
 
     try {
-      // Определяем ключ эпика
-      let epicKey = null;
-      let epicData = null;
+      const epicKey =
+        issue.issueType?.name?.toLowerCase() === 'epic'
+          ? issue.key
+          : issue.epicKey || null;
 
-      if (issue.issueType?.name?.toLowerCase() === 'epic') {
-        epicKey = issue.key;
-        epicData = {
-          key: issue.key,
-          summary: issue.summary,
-          description: issue.description || '',
-          issueType: issue.issueType,
-        };
-      } else if (issue.epicKey) {
-        epicKey = issue.epicKey;
-        try {
-          const epicResponse = await fetch(
-            `http://localhost:3001/api/jira/issue/${epicKey}?userId=${user.id}`
-          );
-          const epicResponseData = await epicResponse.json();
-          if (epicResponse.ok) {
-            epicData = {
-              key: epicResponseData.key,
-              summary: epicResponseData.summary,
-              description: epicResponseData.description || '',
-              issueType: epicResponseData.issueType,
-            };
+      let systemPrompt;
+      let userMessage = `Название задачи: ${issue.summary}. Описание задачи: ${issue.description || 'Описание отсутствует'}`;
+
+      if (epicKey) {
+        // Задача в эпике: подгружаем эпик и все задачи эпика
+        setSlopResponse('Загрузка данных эпика и генерация ответа...');
+
+        let epicData = null;
+        if (issue.issueType?.name?.toLowerCase() === 'epic') {
+          epicData = {
+            key: issue.key,
+            summary: issue.summary,
+            description: issue.description || '',
+            issueType: issue.issueType,
+          };
+        } else {
+          try {
+            const epicResponse = await fetch(
+              `http://localhost:3001/api/jira/issue/${epicKey}?userId=${user.id}`
+            );
+            const epicResponseData = await epicResponse.json();
+            if (epicResponse.ok) {
+              epicData = {
+                key: epicResponseData.key,
+                summary: epicResponseData.summary,
+                description: epicResponseData.description || '',
+                issueType: epicResponseData.issueType,
+              };
+            }
+          } catch (epicErr) {
+            console.warn('Не удалось получить данные эпика:', epicErr);
           }
-        } catch (epicErr) {
-          console.warn('Не удалось получить данные эпика:', epicErr);
         }
+
+        const epicTasksResponse = await fetch(
+          `http://localhost:3001/api/jira/epic/${epicKey}/tasks?userId=${user.id}`
+        );
+        const epicTasksData = await epicTasksResponse.json();
+
+        if (!epicTasksResponse.ok) {
+          throw new Error(epicTasksData.error || 'Ошибка получения задач эпика');
+        }
+
+        const tasks = epicTasksData.tasks || [];
+
+        systemPrompt =
+          'Ты senior-level системный аналитик. В запросе пользователя тебе будет передано название и описание задачи на разработку. Используй название и описание всех задач этого эпика чтобы сформулировать свои предложения по написанию текста задачи или составлению его с нуля.\n';
+
+        if (epicData) {
+          systemPrompt += `${epicData.issueType.name} ${epicData.key} ${epicData.summary} ${epicData.description}\n`;
+        }
+        tasks.forEach((task) => {
+          systemPrompt += `${task.issueType.name} ${task.key} ${task.summary} ${task.description || ''}\n`;
+        });
+      } else {
+        // Задача не в эпике: передаём только название и описание открытой задачи
+        systemPrompt =
+          'Ты senior-level системный аналитик. В запросе пользователя тебе будет передано название и описание задачи на разработку. Сформулируй предложения по написанию текста задачи или составлению его с нуля.';
       }
-
-      if (!epicKey) {
-        setSlopResponse('Ошибка: Задача не связана с эпиком. Функция "Slop!" доступна только для задач в эпиках.');
-        setSlopLoading(false);
-        return;
-      }
-
-      const epicTasksResponse = await fetch(
-        `http://localhost:3001/api/jira/epic/${epicKey}/tasks?userId=${user.id}`
-      );
-      const epicTasksData = await epicTasksResponse.json();
-
-      if (!epicTasksResponse.ok) {
-        throw new Error(epicTasksData.error || 'Ошибка получения задач эпика');
-      }
-
-      const tasks = epicTasksData.tasks || [];
-
-      let systemPrompt = 'Ты senior-level системный аналитик. В запросе пользователя тебе будет передано название и описание задачи на разработку. Используй название и описание всех задач этого эпика чтобы сформулировать свои предложения по написанию текста задачи или составлению его с нуля.\n';
-
-      if (epicData) {
-        systemPrompt += `${epicData.issueType.name} ${epicData.key} ${epicData.summary} ${epicData.description}\n`;
-      }
-
-      tasks.forEach((task) => {
-        systemPrompt += `${task.issueType.name} ${task.key} ${task.summary} ${task.description || ''}\n`;
-      });
-
-      const userMessage = `Название задачи: ${issue.summary}. Описание задачи: ${issue.description || 'Описание отсутствует'}`;
 
       const gigachatResponse = await fetch('http://localhost:3001/api/gigachat/slop', {
         method: 'POST',
@@ -678,19 +684,73 @@ export function IssueDetails() {
       {/* Модальное окно для ответа GigaChat */}
       <Modal
         opened={slopModalOpened}
-        onClose={() => setSlopModalOpened(false)}
+        onClose={() => !slopLoading && setSlopModalOpened(false)}
         title="Ответ GigaChat"
         size="xl"
         centered
         zIndex={1000}
+        closeOnClickOutside={!slopLoading}
+        closeOnEscape={!slopLoading}
       >
         <ScrollArea style={{ height: 400 }}>
-          <Text size="sm" style={{ whiteSpace: 'pre-wrap' }}>
-            {slopResponse || 'Загрузка...'}
-          </Text>
+          {slopLoading ? (
+            <Stack align="center" justify="center" gap="md" style={{ minHeight: 360 }}>
+              <Loader size="lg" type="dots" />
+              <Text size="sm" c="dimmed">
+                Ожидание ответа от нейросети...
+              </Text>
+            </Stack>
+          ) : (
+            <Box
+              component="div"
+              className="slop-markdown"
+              style={{
+                fontSize: 'var(--mantine-font-size-sm)',
+                lineHeight: 1.6,
+              }}
+            >
+              <ReactMarkdown
+                remarkPlugins={[remarkGfm]}
+                components={{
+                  p: ({ children }) => <Text size="sm" mb="xs" component="p">{children}</Text>,
+                  h1: ({ children }) => <Title order={3} mb="sm" mt="md">{children}</Title>,
+                  h2: ({ children }) => <Title order={4} mb="xs" mt="sm">{children}</Title>,
+                  h3: ({ children }) => <Title order={5} mb="xs" mt="sm">{children}</Title>,
+                  ul: ({ children }) => <Text size="sm" component="ul" mb="xs" style={{ paddingLeft: 20 }}>{children}</Text>,
+                  ol: ({ children }) => <Text size="sm" component="ol" mb="xs" style={{ paddingLeft: 20 }}>{children}</Text>,
+                  li: ({ children }) => <Text size="sm" component="li" mb={4}>{children}</Text>,
+                  code: ({ className, children }) =>
+                    className ? (
+                      <Box component="pre" p="xs" mb="xs" style={{ background: 'var(--mantine-color-default-hover)', borderRadius: 4, overflow: 'auto' }}>
+                        <Text size="xs" component="code" style={{ whiteSpace: 'pre' }}>{children}</Text>
+                      </Box>
+                    ) : (
+                      <Text size="sm" component="code" style={{ background: 'var(--mantine-color-default-hover)', padding: '2px 6px', borderRadius: 4 }}>{children}</Text>
+                    ),
+                  blockquote: ({ children }) => (
+                    <Text size="sm" component="blockquote" c="dimmed" style={{ borderLeft: '4px solid var(--mantine-color-default-border)', paddingLeft: 12, marginBottom: 8 }}>{children}</Text>
+                  ),
+                  a: ({ href, children }) => <Anchor size="sm" href={href} target="_blank" rel="noopener noreferrer">{children}</Anchor>,
+                  strong: ({ children }) => <Text size="sm" component="strong" fw={700}>{children}</Text>,
+                  table: ({ children }) => (
+                    <ScrollArea type="auto" mb="xs">
+                      <Box component="table" style={{ borderCollapse: 'collapse', width: '100%', fontSize: 'var(--mantine-font-size-sm)' }}>{children}</Box>
+                    </ScrollArea>
+                  ),
+                  thead: ({ children }) => <Box component="thead">{children}</Box>,
+                  tbody: ({ children }) => <Box component="tbody">{children}</Box>,
+                  tr: ({ children }) => <Box component="tr" style={{ borderBottom: '1px solid var(--mantine-color-default-border)' }}>{children}</Box>,
+                  th: ({ children }) => <Box component="th" style={{ textAlign: 'left', padding: '8px 12px', fontWeight: 600 }}>{children}</Box>,
+                  td: ({ children }) => <Box component="td" style={{ padding: '8px 12px' }}>{children}</Box>,
+                }}
+              >
+                {slopResponse || '—'}
+              </ReactMarkdown>
+            </Box>
+          )}
         </ScrollArea>
         <Group justify="flex-end" mt="md">
-          <Button onClick={() => setSlopModalOpened(false)}>
+          <Button onClick={() => setSlopModalOpened(false)} disabled={slopLoading}>
             Закрыть
           </Button>
         </Group>
