@@ -25,7 +25,7 @@ router.get('/', async (req, res) => {
     }
 
     const result = await pool.query(
-      'SELECT project_tag, jira_pat, jira_base_url, gigachat_credentials, gigachat_scope, gigachat_model, gigachat_timeout FROM user_settings WHERE user_id = $1',
+      'SELECT project_tag, jira_pat, jira_base_url, gigachat_credentials, gigachat_scope, gigachat_model, gigachat_timeout, slop_system_prompt, project_context FROM user_settings WHERE user_id = $1',
       [userId]
     );
 
@@ -42,6 +42,8 @@ router.get('/', async (req, res) => {
         projectTag: null,
         jiraPat: null,
         jiraBaseUrl: null,
+        slopSystemPrompt: null,
+        projectContext: null,
         ...gigachatFromDb(null),
       });
     }
@@ -51,6 +53,8 @@ router.get('/', async (req, res) => {
       projectTag: settings.project_tag,
       jiraPat: settings.jira_pat ? '••••••••••••' : null,
       jiraBaseUrl: settings.jira_base_url,
+      slopSystemPrompt: settings.slop_system_prompt ?? null,
+      projectContext: settings.project_context ?? null,
       ...gigachatFromDb(settings),
     });
   } catch (error) {
@@ -65,7 +69,7 @@ router.get('/', async (req, res) => {
 router.post('/', async (req, res) => {
   try {
     const userId = getUserId(req);
-    const { projectTag, jiraPat, jiraBaseUrl, gigachatCredentials, gigachatScope, gigachatModel, gigachatTimeout } = req.body;
+    const { projectTag, jiraPat, jiraBaseUrl, gigachatCredentials, gigachatScope, gigachatModel, gigachatTimeout, slopSystemPrompt, projectContext } = req.body;
 
     if (!userId) {
       return res.status(400).json({ 
@@ -121,6 +125,11 @@ router.post('/', async (req, res) => {
 
     const jiraPatForInsert = jiraPatNewValue ?? null;
 
+    const slopSystemPromptVal =
+      slopSystemPrompt !== undefined && slopSystemPrompt !== null ? String(slopSystemPrompt) : null;
+    const projectContextVal =
+      projectContext !== undefined && projectContext !== null ? String(projectContext) : null;
+
     if (existing.rows.length > 0) {
       await pool.query(
         `UPDATE user_settings 
@@ -131,6 +140,18 @@ router.post('/', async (req, res) => {
          WHERE user_id = $3`,
         [projectTag || null, jiraBaseUrl || null, userId, gigachatScopeVal, gigachatModelVal, gigachatTimeoutVal]
       );
+      if (slopSystemPrompt !== undefined) {
+        await pool.query(
+          'UPDATE user_settings SET slop_system_prompt = $1, updated_at = CURRENT_TIMESTAMP WHERE user_id = $2',
+          [slopSystemPromptVal, userId]
+        );
+      }
+      if (projectContext !== undefined) {
+        await pool.query(
+          'UPDATE user_settings SET project_context = $1, updated_at = CURRENT_TIMESTAMP WHERE user_id = $2',
+          [projectContextVal, userId]
+        );
+      }
       if (jiraPatNewValue !== undefined) {
         await pool.query(
           'UPDATE user_settings SET jira_pat = $1, updated_at = CURRENT_TIMESTAMP WHERE user_id = $2',
@@ -145,9 +166,9 @@ router.post('/', async (req, res) => {
       }
     } else {
       await pool.query(
-        `INSERT INTO user_settings (user_id, project_tag, jira_pat, jira_base_url, gigachat_credentials, gigachat_scope, gigachat_model, gigachat_timeout)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
-        [userId, projectTag || null, jiraPatForInsert, jiraBaseUrl || null, credentialsNewValue ?? null, gigachatScopeVal, gigachatModelVal, gigachatTimeoutVal]
+        `INSERT INTO user_settings (user_id, project_tag, jira_pat, jira_base_url, gigachat_credentials, gigachat_scope, gigachat_model, gigachat_timeout, slop_system_prompt, project_context)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
+        [userId, projectTag || null, jiraPatForInsert, jiraBaseUrl || null, credentialsNewValue ?? null, gigachatScopeVal, gigachatModelVal, gigachatTimeoutVal, slopSystemPromptVal, projectContextVal]
       );
     }
 

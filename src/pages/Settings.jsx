@@ -6,6 +6,7 @@ import {
   Stack,
   Title,
   TextInput,
+  Textarea,
   Button,
   Group,
   Text,
@@ -31,6 +32,8 @@ export function Settings() {
     gigachatScope: '',
     gigachatModel: '',
     gigachatTimeout: '',
+    slopSystemPrompt: '',
+    projectContext: '',
   });
 
   useEffect(() => {
@@ -60,6 +63,8 @@ export function Settings() {
           gigachatScope: data.gigachatScope || '',
           gigachatModel: data.gigachatModel || '',
           gigachatTimeout: data.gigachatTimeout ?? '',
+          slopSystemPrompt: data.slopSystemPrompt ?? '',
+          projectContext: data.projectContext ?? '',
         });
       } else {
         notifications.show({
@@ -98,6 +103,8 @@ export function Settings() {
           gigachatScope: formData.gigachatScope || undefined,
           gigachatModel: formData.gigachatModel || undefined,
           gigachatTimeout: formData.gigachatTimeout !== '' ? formData.gigachatTimeout : undefined,
+          slopSystemPrompt: formData.slopSystemPrompt,
+          projectContext: formData.projectContext,
         }),
       });
 
@@ -298,6 +305,33 @@ export function Settings() {
               onChange={(e) => setFormData({ ...formData, gigachatTimeout: e.target.value })}
               disabled={loading || saving}
               description="Таймаут подключения в секундах"
+            />
+
+            <Divider my="lg" />
+
+            <Title order={4}>Системный промпт для GigaChat</Title>
+            <Text size="sm" c="dimmed" mb="xs">
+              Инструкции, которые подставляются в системный промпт при нажатии кнопки Slop! на задаче. Если у задачи есть родительский эпик, после инструкций в промпт будет добавлено содержимое эпика.
+            </Text>
+            <Textarea
+              label="Инструкции системного промпта"
+              placeholder="Ты senior-level системный аналитик. В запросе пользователя тебе будет передано название и описание задачи на разработку. Сформулируй предложения по написанию текста задачи или составлению его с нуля."
+              value={formData.slopSystemPrompt}
+              onChange={(e) => setFormData({ ...formData, slopSystemPrompt: e.target.value })}
+              disabled={loading || saving}
+              minRows={4}
+              autosize
+            />
+
+            <Textarea
+              label="Дополнительный контекст проекта"
+              placeholder="Глоссарий, доменные термины, описание проекта..."
+              value={formData.projectContext}
+              onChange={(e) => setFormData({ ...formData, projectContext: e.target.value })}
+              disabled={loading || saving}
+              minRows={4}
+              autosize
+              description="Глоссарий и описание проекта, которое поможет нейросети правильно интерпретировать запросы в задачах."
             />
 
             <Group justify="flex-end" mt="md">

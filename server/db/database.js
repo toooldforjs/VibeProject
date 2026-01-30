@@ -75,6 +75,14 @@ export async function initDatabase() {
       ALTER TABLE user_settings ADD COLUMN IF NOT EXISTS gigachat_model VARCHAR(100);
       ALTER TABLE user_settings ADD COLUMN IF NOT EXISTS gigachat_timeout INTEGER;
     `);
+    // Инструкции системного промпта для Slop! (редактируются в настройках)
+    await pool.query(`
+      ALTER TABLE user_settings ADD COLUMN IF NOT EXISTS slop_system_prompt TEXT;
+    `);
+    // Дополнительный контекст проекта (глоссарий, описание) — вставляется в конец системного промпта
+    await pool.query(`
+      ALTER TABLE user_settings ADD COLUMN IF NOT EXISTS project_context TEXT;
+    `);
 
     console.log('✅ Таблица user_settings создана/проверена');
 

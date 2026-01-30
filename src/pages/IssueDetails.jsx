@@ -130,6 +130,17 @@ export function IssueDetails() {
     return () => el.removeEventListener('click', onDescClick);
   }, [descriptionHtmlWithImages]);
 
+  const DEFAULT_SLOP_INSTRUCTIONS =
+    'Ты senior-level системный аналитик. В запросе пользователя тебе будет передано название и описание задачи на разработку. Сформулируй предложения по написанию текста задачи или составлению его с нуля.';
+
+  const formatIssueForPrompt = (item) => {
+    const type = item.issueType?.name ?? '';
+    const key = item.key ?? '';
+    const summary = item.summary ?? '';
+    const description = item.description ?? '';
+    return `Тип задачи: ${type}\nНомер задачи: ${key}\nНаименование задачи: ${summary}\nОписание задачи: ${description}\n`;
+  };
+
   const handleSlopClick = async () => {
     if (!issue || !user) {
       notifications.show({
@@ -145,16 +156,21 @@ export function IssueDetails() {
     setSlopResponse('Загрузка данных и генерация ответа...');
 
     try {
+      const settingsRes = await fetch(`http://localhost:3001/api/settings?userId=${user.id}`);
+      const settingsData = await settingsRes.json();
+      const instructions =
+        (settingsData.slopSystemPrompt && String(settingsData.slopSystemPrompt).trim()) || DEFAULT_SLOP_INSTRUCTIONS;
+
       const epicKey =
         issue.issueType?.name?.toLowerCase() === 'epic'
           ? issue.key
           : issue.epicKey || null;
 
-      let systemPrompt;
-      let userMessage = `Название задачи: ${issue.summary}. Описание задачи: ${issue.description || 'Описание отсутствует'}`;
+      let systemPrompt = instructions;
+      const userMessage = `Тип задачи: ${issue.issueType?.name ?? ''}. Номер задачи: ${issue.key ?? ''}. Наименование задачи: ${issue.summary}. Описание задачи: ${issue.description || 'Описание отсутствует'}`;
 
       if (epicKey) {
-        // Задача в эпике: подгружаем эпик и все задачи эпика
+        // Задача в эпике: подгружаем только эпик, добавляем его содержимое с префиксами полей (без вложенных задач)
         setSlopResponse('Загрузка данных эпика и генерация ответа...');
 
         let epicData = null;
@@ -184,43 +200,32 @@ export function IssueDetails() {
           }
         }
 
-        const epicTasksResponse = await fetch(
-          `http://localhost:3001/api/jira/epic/${epicKey}/tasks?userId=${user.id}`
-        );
-        const epicTasksData = await epicTasksResponse.json();
-
-        if (!epicTasksResponse.ok) {
-          throw new Error(epicTasksData.error || 'Ошибка получения задач эпика');
-        }
-
-        const tasks = epicTasksData.tasks || [];
-
-        systemPrompt =
-          'Ты senior-level системный аналитик. В запросе пользователя тебе будет передано название и описание задачи на разработку. Используй название и описание всех задач этого эпика чтобы сформулировать свои предложения по написанию текста задачи или составлению его с нуля.\n';
-
         if (epicData) {
-          systemPrompt += `${epicData.issueType.name} ${epicData.key} ${epicData.summary} ${epicData.description}\n`;
+          systemPrompt += '\n\n' + formatIssueForPrompt(epicData);
         }
-        tasks.forEach((task) => {
-          systemPrompt += `${task.issueType.name} ${task.key} ${task.summary} ${task.description || ''}\n`;
-        });
-      } else {
-        // Задача не в эпике: передаём только название и описание открытой задачи
-        systemPrompt =
-          'Ты senior-level системный аналитик. В запросе пользователя тебе будет передано название и описание задачи на разработку. Сформулируй предложения по написанию текста задачи или составлению его с нуля.';
+      }
+      const projectContext = settingsData.projectContext && String(settingsData.projectContext).trim();
+      if (projectContext) {
+        systemPrompt += '\n\nИнформация о проекте: ' + projectContext;
       }
 
+      const requestBody = {
+        userId: user.id,
+        systemPrompt,
+        userMessage,
+        model: 'GigaChat-2',
+      };
+      console.log('[GigaChat] Запрос в нейросеть:', {
+        url: 'http://localhost:3001/api/gigachat/slop',
+        method: 'POST',
+        body: requestBody,
+      });
       const gigachatResponse = await fetch('http://localhost:3001/api/gigachat/slop', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({
-          userId: user.id,
-          systemPrompt,
-          userMessage,
-          model: 'GigaChat-2',
-        }),
+        body: JSON.stringify(requestBody),
       });
 
       const gigachatData = await gigachatResponse.json();
@@ -349,6 +354,7 @@ export function IssueDetails() {
       }
       setComments((prev) => [data.comment, ...prev]);
       notifications.show({ message: 'Ответ опубликован в комментариях от имени Системы', color: 'green' });
+      setSlopModalOpened(false);
     } catch (err) {
       notifications.show({ title: 'Ошибка', message: err.message, color: 'red' });
     } finally {
@@ -424,6 +430,11 @@ export function IssueDetails() {
                 </Text>
               </Menu.Label>
               <Menu.Divider />
+              <Menu.Item
+                onClick={() => navigate('/settings')}
+              >
+                Настройки
+              </Menu.Item>
               <Menu.Item
                 color="red"
                 onClick={handleLogout}
