@@ -7,6 +7,7 @@ import authRoutes from './routes/auth.js';
 import jiraRoutes from './routes/jira.js';
 import settingsRoutes from './routes/settings.js';
 import gigachatRoutes from './routes/gigachat.js';
+import commentsRoutes from './routes/comments.js';
 
 dotenv.config();
 
@@ -39,6 +40,7 @@ app.use('/api/auth', authRoutes);
 app.use('/api/jira', jiraRoutes);
 app.use('/api/settings', settingsRoutes);
 app.use('/api/gigachat', gigachatRoutes);
+app.use('/api/comments', commentsRoutes);
 
 // Health check
 app.get('/api/health', (req, res) => {

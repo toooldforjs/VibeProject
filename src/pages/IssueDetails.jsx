@@ -18,6 +18,9 @@ import {
   Menu,
   Modal,
   ScrollArea,
+  Textarea,
+  ActionIcon,
+  Tooltip,
 } from '@mantine/core';
 import { useAuth } from '../contexts/AuthContext';
 import { notifications } from '@mantine/notifications';
@@ -26,6 +29,9 @@ import { getStatusColor, getIssueTypeColor } from '../utils/statusColors';
 // Простые компоненты-заглушки для иконок
 const IconExternalLink = ({ size = 16 }) => <span style={{ fontSize: size }}>↗</span>;
 const IconFile = ({ size = 16 }) => <span style={{ fontSize: size }}>📄</span>;
+const IconTrash = ({ size = 16 }) => <span style={{ fontSize: size }}>🗑</span>;
+const IconCopy = ({ size = 16 }) => <span style={{ fontSize: size }}>📋</span>;
+const IconFileText = ({ size = 16 }) => <span style={{ fontSize: size }}>📝</span>;
 
 const API_BASE = 'http://localhost:3001';
 
@@ -82,10 +88,22 @@ export function IssueDetails() {
   const [imageModalOpened, setImageModalOpened] = useState(false);
   const [imageModalSrc, setImageModalSrc] = useState('');
   const descriptionRef = useRef(null);
+  const [comments, setComments] = useState([]);
+  const [commentBody, setCommentBody] = useState('');
+  const [commentSubmitting, setCommentSubmitting] = useState(false);
+  const [commentsLoading, setCommentsLoading] = useState(false);
+  const [hoveredCommentId, setHoveredCommentId] = useState(null);
+  const [slopSendToCommentsLoading, setSlopSendToCommentsLoading] = useState(false);
 
   useEffect(() => {
     if (issueKey) {
       fetchIssueDetails(issueKey);
+    }
+  }, [issueKey]);
+
+  useEffect(() => {
+    if (issueKey) {
+      fetchComments(issueKey);
     }
   }, [issueKey]);
 
@@ -247,6 +265,94 @@ export function IssueDetails() {
       });
     } finally {
       setLoading(false);
+    }
+  };
+
+  const fetchComments = async (key) => {
+    setCommentsLoading(true);
+    try {
+      const response = await fetch(`${API_BASE}/api/comments?issueKey=${encodeURIComponent(key)}`);
+      const data = await response.json();
+      if (response.ok) {
+        setComments(data.comments || []);
+      } else {
+        setComments([]);
+      }
+    } catch {
+      setComments([]);
+    } finally {
+      setCommentsLoading(false);
+    }
+  };
+
+  const handleAddComment = async () => {
+    if (!user?.id || !issueKey || !commentBody.trim()) return;
+    setCommentSubmitting(true);
+    try {
+      const response = await fetch(`${API_BASE}/api/comments`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          issueKey,
+          userId: user.id,
+          body: commentBody.trim(),
+        }),
+      });
+      const data = await response.json();
+      if (!response.ok) {
+        throw new Error(data.error || 'Ошибка отправки комментария');
+      }
+      setComments((prev) => [data.comment, ...prev]);
+      setCommentBody('');
+      notifications.show({ message: 'Комментарий добавлен', color: 'green' });
+    } catch (err) {
+      notifications.show({ title: 'Ошибка', message: err.message, color: 'red' });
+    } finally {
+      setCommentSubmitting(false);
+    }
+  };
+
+  const handleDeleteComment = async (commentId) => {
+    if (!user?.id) return;
+    try {
+      const response = await fetch(
+        `${API_BASE}/api/comments/${commentId}?userId=${user.id}`,
+        { method: 'DELETE' }
+      );
+      const data = await response.json();
+      if (!response.ok) {
+        throw new Error(data.error || 'Ошибка удаления');
+      }
+      setComments((prev) => prev.filter((c) => c.id !== commentId));
+      notifications.show({ message: 'Комментарий удалён', color: 'green' });
+    } catch (err) {
+      notifications.show({ title: 'Ошибка', message: err.message, color: 'red' });
+    }
+  };
+
+  const handleSlopSendToComments = async () => {
+    if (!issueKey || !slopResponse?.trim()) return;
+    setSlopSendToCommentsLoading(true);
+    try {
+      const response = await fetch(`${API_BASE}/api/comments`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          issueKey,
+          body: slopResponse.trim(),
+          asSystem: true,
+        }),
+      });
+      const data = await response.json();
+      if (!response.ok) {
+        throw new Error(data.error || 'Ошибка публикации в комментарии');
+      }
+      setComments((prev) => [data.comment, ...prev]);
+      notifications.show({ message: 'Ответ опубликован в комментариях от имени Системы', color: 'green' });
+    } catch (err) {
+      notifications.show({ title: 'Ошибка', message: err.message, color: 'red' });
+    } finally {
+      setSlopSendToCommentsLoading(false);
     }
   };
 
@@ -697,6 +803,155 @@ export function IssueDetails() {
                   </>
                 );
               })()}
+
+              {/* Комментарии */}
+              <Divider />
+              <Box>
+                <Text size="sm" fw={600} mb="md">Комментарии</Text>
+                {user ? (
+                  <Stack gap="md">
+                    <Box>
+                      <Textarea
+                        placeholder="Поддерживается Markdown: **жирный**, *курсив*, списки (- или 1.), ссылки [текст](url), код `код`"
+                        value={commentBody}
+                        onChange={(e) => setCommentBody(e.currentTarget.value)}
+                        minRows={3}
+                        maxRows={8}
+                        autosize
+                      />
+                      <Button
+                        mt="xs"
+                        variant="filled"
+                        color="violet"
+                        onClick={handleAddComment}
+                        loading={commentSubmitting}
+                        disabled={!commentBody.trim()}
+                      >
+                        Отправить
+                      </Button>
+                    </Box>
+                    {commentsLoading ? (
+                      <Group justify="center" p="md">
+                        <Loader size="sm" />
+                      </Group>
+                    ) : (
+                      <Stack gap="md">
+                        {comments.length === 0 ? (
+                          <Text size="sm" c="dimmed">Пока нет комментариев.</Text>
+                        ) : (
+                          comments.map((comment) => (
+                            <Paper
+                              key={comment.id}
+                              p="md"
+                              withBorder
+                              radius="md"
+                              style={{ position: 'relative' }}
+                              onMouseEnter={() => setHoveredCommentId(comment.id)}
+                              onMouseLeave={() => setHoveredCommentId(null)}
+                            >
+                              <Group justify="space-between" align="flex-start" mb="xs">
+                                <Group gap="xs">
+                                  <Avatar color="violet" radius="xl" size="sm">
+                                    {(comment.authorEmail || 'U').charAt(0).toUpperCase()}
+                                  </Avatar>
+                                  <Box>
+                                    <Text size="sm" fw={600}>{comment.authorName}</Text>
+                                    <Text size="xs" c="dimmed">{comment.authorEmail}</Text>
+                                  </Box>
+                                </Group>
+                                <Group gap="xs">
+                                  <Text size="xs" c="dimmed">
+                                    {formatDate(comment.createdAt)}
+                                  </Text>
+                                  {hoveredCommentId === comment.id && (
+                                    <>
+                                      <Tooltip label="Скопировать в Markdown">
+                                        <ActionIcon
+                                          variant="subtle"
+                                          color="gray"
+                                          size="sm"
+                                          onClick={() => {
+                                            const raw = comment.bodyMarkdown || '';
+                                            navigator.clipboard.writeText(raw).then(
+                                              () => notifications.show({ message: 'Скопировано в буфер (Markdown)', color: 'green' }),
+                                              () => notifications.show({ message: 'Не удалось скопировать', color: 'red' })
+                                            );
+                                          }}
+                                        >
+                                          <IconCopy size={14} />
+                                        </ActionIcon>
+                                      </Tooltip>
+                                      <Tooltip label="Скопировать текст">
+                                        <ActionIcon
+                                          variant="subtle"
+                                          color="gray"
+                                          size="sm"
+                                          onClick={() => {
+                                            const plain = stripMarkdown(comment.bodyMarkdown || '');
+                                            navigator.clipboard.writeText(plain).then(
+                                              () => notifications.show({ message: 'Скопировано в буфер (текст)', color: 'green' }),
+                                              () => notifications.show({ message: 'Не удалось скопировать', color: 'red' })
+                                            );
+                                          }}
+                                        >
+                                          <IconFileText size={14} />
+                                        </ActionIcon>
+                                      </Tooltip>
+                                    </>
+                                  )}
+                                  {user?.id === comment.userId && (
+                                    <Tooltip label="Удалить комментарий">
+                                      <ActionIcon
+                                        variant="subtle"
+                                        color="red"
+                                        size="sm"
+                                        onClick={() => handleDeleteComment(comment.id)}
+                                      >
+                                        <IconTrash size={16} />
+                                      </ActionIcon>
+                                    </Tooltip>
+                                  )}
+                                </Group>
+                              </Group>
+                              <Box
+                                className="comment-markdown"
+                                style={{
+                                  fontSize: 'var(--mantine-font-size-sm)',
+                                  lineHeight: 1.5,
+                                }}
+                              >
+                                <ReactMarkdown
+                                  remarkPlugins={[remarkGfm]}
+                                  components={{
+                                    p: ({ children }) => <Text size="sm" mb="xs" component="p">{children}</Text>,
+                                    ul: ({ children }) => <Text size="sm" component="ul" mb="xs" style={{ paddingLeft: 20 }}>{children}</Text>,
+                                    ol: ({ children }) => <Text size="sm" component="ol" mb="xs" style={{ paddingLeft: 20 }}>{children}</Text>,
+                                    li: ({ children }) => <Text size="sm" component="li" mb={2}>{children}</Text>,
+                                    code: ({ className, children }) =>
+                                      className ? (
+                                        <Box component="pre" p="xs" mb="xs" style={{ background: 'var(--mantine-color-default-hover)', borderRadius: 4, overflow: 'auto' }}>
+                                          <Text size="xs" component="code" style={{ whiteSpace: 'pre' }}>{children}</Text>
+                                        </Box>
+                                      ) : (
+                                        <Text size="sm" component="code" style={{ background: 'var(--mantine-color-default-hover)', padding: '2px 6px', borderRadius: 4 }}>{children}</Text>
+                                      ),
+                                    strong: ({ children }) => <Text size="sm" component="strong" fw={700}>{children}</Text>,
+                                    a: ({ href, children }) => <Anchor size="sm" href={href} target="_blank" rel="noopener noreferrer">{children}</Anchor>,
+                                  }}
+                                >
+                                  {comment.bodyMarkdown || ''}
+                                </ReactMarkdown>
+                              </Box>
+                            </Paper>
+                          ))
+                        )}
+                      </Stack>
+                    )}
+                  </Stack>
+                ) : (
+                  <Text size="sm" c="dimmed">Войдите, чтобы оставлять комментарии.</Text>
+                )}
+              </Box>
             </Stack>
           ) : null}
         </Paper>
@@ -775,6 +1030,15 @@ export function IssueDetails() {
           )}
         </ScrollArea>
         <Group justify="flex-end" mt="md" gap="sm">
+          <Button
+            variant="light"
+            color="violet"
+            onClick={handleSlopSendToComments}
+            loading={slopSendToCommentsLoading}
+            disabled={slopLoading || !(slopResponse || '').trim()}
+          >
+            Отправить в комментарии
+          </Button>
           <Button
             variant="light"
             onClick={() => {

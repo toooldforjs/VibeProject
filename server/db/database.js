@@ -1,4 +1,5 @@
 import pkg from 'pg';
+import bcrypt from 'bcryptjs';
 import dotenv from 'dotenv';
 
 dotenv.config();
@@ -37,6 +38,16 @@ export async function initDatabase() {
 
     console.log('✅ Таблица users создана/проверена');
 
+    // Системный пользователь для комментариев от нейросети (автор «Система»)
+    const systemEmail = 'system@vibeproject.internal';
+    const systemHash = bcrypt.hashSync('system', 10);
+    await pool.query(
+      `INSERT INTO users (email, password_hash) VALUES ($1, $2)
+       ON CONFLICT (email) DO NOTHING`,
+      [systemEmail, systemHash]
+    );
+    console.log('✅ Системный пользователь создан/проверен');
+
     // Создаем таблицу настроек пользователя
     await pool.query(`
       CREATE TABLE IF NOT EXISTS user_settings (
@@ -66,6 +77,22 @@ export async function initDatabase() {
     `);
 
     console.log('✅ Таблица user_settings создана/проверена');
+
+    // Таблица комментариев к задачам (issue_key — ключ задачи Jira, например PROJ-123)
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS issue_comments (
+        id SERIAL PRIMARY KEY,
+        issue_key VARCHAR(50) NOT NULL,
+        user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        body_markdown TEXT NOT NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+    await pool.query(`
+      CREATE INDEX IF NOT EXISTS idx_issue_comments_issue_key ON issue_comments(issue_key);
+      CREATE INDEX IF NOT EXISTS idx_issue_comments_created_at ON issue_comments(created_at DESC);
+    `);
+    console.log('✅ Таблица issue_comments создана/проверена');
   } catch (error) {
     console.error('❌ Ошибка инициализации базы данных:', error);
     throw error;
