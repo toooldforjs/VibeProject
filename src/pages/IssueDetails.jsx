@@ -48,6 +48,27 @@ function rewriteDescriptionHtmlImages(html, jiraBaseUrl, userId) {
   });
 }
 
+/** Преобразует markdown-строку в обычный текст без разметки */
+function stripMarkdown(md) {
+  if (!md || typeof md !== 'string') return '';
+  let text = md
+    .replace(/```[\s\S]*?```/g, (m) => m.replace(/^```\w*\n?|```$/g, '').trim())
+    .replace(/`[^`]+`/g, (m) => m.slice(1, -1))
+    .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')
+    .replace(/!\[([^\]]*)\]\([^)]+\)/g, '$1')
+    .replace(/\*\*([^*]+)\*\*/g, '$1')
+    .replace(/\*([^*]+)\*/g, '$1')
+    .replace(/__([^_]+)__/g, '$1')
+    .replace(/_([^_]+)_/g, '$1')
+    .replace(/^#+\s+/gm, '')
+    .replace(/^>\s*/gm, '')
+    .replace(/^[-*+]\s+/gm, '')
+    .replace(/^\d+\.\s+/gm, '')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+  return text;
+}
+
 export function IssueDetails() {
   const { issueKey } = useParams();
   const navigate = useNavigate();
@@ -686,15 +707,19 @@ export function IssueDetails() {
         opened={slopModalOpened}
         onClose={() => !slopLoading && setSlopModalOpened(false)}
         title="Ответ GigaChat"
-        size="xl"
+        size={1200}
         centered
         zIndex={1000}
         closeOnClickOutside={!slopLoading}
         closeOnEscape={!slopLoading}
+        styles={{
+          content: { maxWidth: '95vw' },
+          body: { padding: 40 },
+        }}
       >
-        <ScrollArea style={{ height: 400 }}>
+        <ScrollArea style={{ height: 600 }}>
           {slopLoading ? (
-            <Stack align="center" justify="center" gap="md" style={{ minHeight: 360 }}>
+            <Stack align="center" justify="center" gap="md" style={{ minHeight: 540 }}>
               <Loader size="lg" type="dots" />
               <Text size="sm" c="dimmed">
                 Ожидание ответа от нейросети...
@@ -749,7 +774,33 @@ export function IssueDetails() {
             </Box>
           )}
         </ScrollArea>
-        <Group justify="flex-end" mt="md">
+        <Group justify="flex-end" mt="md" gap="sm">
+          <Button
+            variant="light"
+            onClick={() => {
+              const raw = slopResponse || '';
+              navigator.clipboard.writeText(raw).then(
+                () => notifications.show({ message: 'Скопировано в буфер (Markdown)', color: 'green' }),
+                () => notifications.show({ message: 'Не удалось скопировать', color: 'red' })
+              );
+            }}
+            disabled={slopLoading}
+          >
+            Скопировать в Markdown
+          </Button>
+          <Button
+            variant="light"
+            onClick={() => {
+              const plain = stripMarkdown(slopResponse || '');
+              navigator.clipboard.writeText(plain).then(
+                () => notifications.show({ message: 'Скопировано в буфер (текст)', color: 'green' }),
+                () => notifications.show({ message: 'Не удалось скопировать', color: 'red' })
+              );
+            }}
+            disabled={slopLoading}
+          >
+            Скопировать текст
+          </Button>
           <Button onClick={() => setSlopModalOpened(false)} disabled={slopLoading}>
             Закрыть
           </Button>
