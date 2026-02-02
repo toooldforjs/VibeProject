@@ -108,6 +108,76 @@ function stripMarkdown(md) {
 	return text;
 }
 
+/** Регулярное выражение для ссылок на страницы Confluence (viewpage.action?pageId=...) */
+const CONFLUENCE_URL_RE = /https?:\/\/[^\s"'<>]+viewpage\.action\?pageId=\d+[^\s"'<>]*/gi;
+
+/**
+ * Извлекает уникальные URL страниц Confluence из строки (HTML или обычный текст).
+ * @param {string} str — описание задачи (HTML или текст)
+ * @returns {string[]}
+ */
+function extractConfluenceUrls(str) {
+	if (!str || typeof str !== "string") return [];
+	const matches = str.match(CONFLUENCE_URL_RE) || [];
+	return [...new Set(matches.map((u) => u.replace(/&amp;/g, "&")))];
+}
+
+/**
+ * Загружает содержимое страницы Confluence по URL и возвращает в виде обычного текста.
+ * @param {string} url — полный URL страницы Confluence
+ * @param {number} userId — id пользователя (для настроек Confluence)
+ * @returns {Promise<string|null>} — текст страницы или null при ошибке
+ */
+async function fetchConfluencePageAsText(url, userId) {
+	try {
+		const res = await fetch("http://localhost:3001/api/confluence/page", {
+			method: "POST",
+			headers: { "Content-Type": "application/json" },
+			body: JSON.stringify({ url, userId }),
+		});
+		const data = await res.json();
+		if (!res.ok || !data?.body?.storage?.value) return null;
+		const text = htmlToPlainText(data.body.storage.value);
+		return text && text.trim() ? text.trim() : null;
+	} catch {
+		return null;
+	}
+}
+
+/**
+ * Заменяет в тексте описания ссылки на Confluence на содержимое соответствующих страниц.
+ * @param {string} descriptionText — исходный текст описания (уже в виде plain text)
+ * @param {string} sourceForUrls — строка, из которой извлекать URL (часто HTML описания)
+ * @param {number} userId
+ * @param {(msg: string) => void} setStatus — опциональный callback для обновления статуса (например «Загрузка Confluence…»)
+ * @returns {Promise<string>} — описание с подставленным содержимым Confluence вместо ссылок
+ */
+async function expandDescriptionWithConfluence(descriptionText, sourceForUrls, userId, setStatus) {
+	const urls = extractConfluenceUrls(sourceForUrls || descriptionText);
+	if (!urls.length) return descriptionText || "";
+
+	let result = descriptionText || "";
+	for (let i = 0; i < urls.length; i++) {
+		const url = urls[i];
+		if (setStatus) setStatus(`Загрузка страниц Confluence (${i + 1}/${urls.length})...`);
+		const content = await fetchConfluencePageAsText(url, userId);
+		const placeholder =
+			content != null
+				? `\n[Содержимое страницы Confluence]\n${content}\n[/Содержимое]\n`
+				: `\n[Ссылка на Confluence: ${url} — содержимое недоступно]\n`;
+		const normalizedUrl = url.replace(/&amp;/g, "&");
+		// Ссылка может быть в тексте (нормализованная или как в HTML); если только в HTML как href — подставляем в конец
+		if (result.includes(normalizedUrl)) {
+			result = result.split(normalizedUrl).join(placeholder);
+		} else if (result.includes(url)) {
+			result = result.split(url).join(placeholder);
+		} else {
+			result += placeholder;
+		}
+	}
+	return result;
+}
+
 export function IssueDetails() {
 	const { issueKey } = useParams();
 	const navigate = useNavigate();
@@ -197,8 +267,25 @@ export function IssueDetails() {
 		return () => el.removeEventListener("click", onDescClick);
 	}, [descriptionHtmlWithImages]);
 
-	const DEFAULT_SLOP_INSTRUCTIONS =
-		"Ты senior-level системный аналитик. В запросе пользователя тебе будет передано название и описание задачи на разработку. Сформулируй предложения по написанию текста задачи или составлению его с нуля.";
+	const DEFAULT_SLOP_INSTRUCTIONS = `Ты senior-level системный аналитик. Вместе с этим текстом будет передана родительская задача для задачи из запроса пользователя. В запросе пользователя тебе будет переданы тип, номер, название и описание задачи.
+Используй все эти данные и профессионально перепиши задачу из пользовательского запроса.
+Никогда не запрашивай недостающую информацию и не пиши, что не можешь что-то описать. Просто пиши те рекомендации, в которых уверена.
+Если вместе с текстом не пришло содержимое Epic, то формируй ответ за основании этих инструкций и пользовательского запроса.
+Используй следующую структуру задачи:
+- номер задачи
+- название задачи
+- user story (кто, что , для чего)
+- use case (участники + порядок шагов)
+- sequence-диаграмма (в формате PlantUML)
+- функциональные требования
+- нефункциональные требования
+- ограничения
+- требования к пользовательскому интерфейсу
+- требования к базе данных (ERD-диаграммы в формате PlantUML)
+- требования к сохранению данных на S3
+- Контракты API (endpoint, назначение, состав запроса, состав ответа, ошибки и статусы запроса).
+Если для целей задачи не требуется заполнение какого-то из разделов - пропусти его.
+Для ответа используй markdown форматирование. Все разделы структуры выделяй заголовками второго уровня, если есть вложенные подразделы - их выделяй заголовками третьего уровня. Фрагменты кода и блоки plantuml выделяй как код.`;
 
 	const formatIssueForPrompt = (item) => {
 		const type = item.issueType?.name ?? "";
@@ -230,10 +317,22 @@ export function IssueDetails() {
 
 			const epicKey = issue.issueType?.name?.toLowerCase() === "epic" ? issue.key : issue.epicKey || null;
 
+			// Текст описания для промпта: из HTML в plain text или как есть; ссылки Confluence заменяем на содержимое страниц
+			const descriptionPlain = issue.descriptionHtml
+				? htmlToPlainText(issue.descriptionHtml)
+				: issue.description || "Описание отсутствует";
+			const sourceForUrls = issue.descriptionHtml || issue.description || "";
+			const expandedDescription = await expandDescriptionWithConfluence(
+				descriptionPlain,
+				sourceForUrls,
+				user.id,
+				setSlopResponse
+			);
+
 			let systemPrompt = instructions;
 			const userMessage = `Тип задачи: ${issue.issueType?.name ?? ""}. Номер задачи: ${
 				issue.key ?? ""
-			}. Наименование задачи: ${issue.summary}. Описание задачи: ${issue.description || "Описание отсутствует"}`;
+			}. Наименование задачи: ${issue.summary}. Описание задачи: ${expandedDescription}`;
 
 			if (epicKey) {
 				// Задача в эпике: подгружаем только эпик, добавляем его содержимое с префиксами полей (без вложенных задач)

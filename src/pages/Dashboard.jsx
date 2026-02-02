@@ -163,7 +163,7 @@ export function Dashboard() {
 		const credsOk = s.gigachatCredentialsSet || filled(s.gigachatCredentials);
 		if (!filled(s.projectTag) || !(s.jiraPat && String(s.jiraPat).trim()) || !filled(s.jiraBaseUrl)) return false;
 		if (!credsOk || !filled(s.gigachatScope) || !filled(s.gigachatModel)) return false;
-		if (!filled(s.slopSystemPrompt)) return false;
+		// Инструкции системного промпта не проверяем — есть значение по умолчанию.
 		// Таймаут (GIGACHAT_TIMEOUT) не проверяем — необязателен.
 		if (s.projectContextType === "confluence") {
 			if (!filled(s.projectContextConfluenceUrl)) return false;
@@ -186,7 +186,6 @@ export function Dashboard() {
 			missing.push("Данные для авторизации в GigaChat API");
 		if (!filled(s.gigachatScope)) missing.push("Scope (GigaChat)");
 		if (!filled(s.gigachatModel)) missing.push("Модель (GIGACHAT_MODEL)");
-		if (!filled(s.slopSystemPrompt)) missing.push("Инструкции системного промпта");
 		if (s.projectContextType === "confluence") {
 			if (!filled(s.projectContextConfluenceUrl)) missing.push("Ссылка на страницу Confluence");
 			if (!filled(s.confluenceUsername)) missing.push("Confluence логин");
