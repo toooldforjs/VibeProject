@@ -39,6 +39,8 @@ router.get('/', async (req, res) => {
   try {
     const userId = getUserId(req);
 
+    console.log('[Settings GET] userId из запроса:', userId, '| тип:', typeof userId);
+
     if (!userId) {
       return res.status(400).json({
         error: 'User ID is required'
@@ -49,6 +51,8 @@ router.get('/', async (req, res) => {
       'SELECT project_tag, jira_pat, jira_base_url, gigachat_credentials, gigachat_scope, gigachat_model, gigachat_timeout, slop_system_prompt, project_context, project_context_type, project_context_confluence_url, confluence_username, confluence_password FROM user_settings WHERE user_id = $1',
       [userId]
     );
+
+    console.log('[Settings GET] Найдено записей:', result.rows.length);
 
     const gigachatFromDb = (row) => ({
       gigachatCredentialsSet: !!row?.gigachat_credentials,

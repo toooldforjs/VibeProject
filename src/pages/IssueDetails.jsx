@@ -13,15 +13,15 @@ import {
 	Loader,
 	Badge,
 	Divider,
-	Avatar,
 	Anchor,
-	Menu,
 	Modal,
 	ScrollArea,
 	Textarea,
 	ActionIcon,
 	Tooltip,
+	Avatar,
 } from "@mantine/core";
+import { Header } from "../components/Header";
 import { useAuth } from "../contexts/AuthContext";
 import { notifications } from "@mantine/notifications";
 import { getStatusColor, getIssueTypeColor } from "../utils/statusColors";
@@ -50,6 +50,135 @@ const IconConfluence = ({ size = 16 }) => (
 );
 
 const API_BASE = "http://localhost:3001";
+
+/** Общая конфигурация компонентов для ReactMarkdown (базовые элементы) */
+const baseMarkdownComponents = {
+	p: ({ children }) => (
+		<Text size="sm" mb="xs" component="p">
+			{children}
+		</Text>
+	),
+	ul: ({ children }) => (
+		<Text size="sm" component="ul" mb="xs" style={{ paddingLeft: 20 }}>
+			{children}
+		</Text>
+	),
+	ol: ({ children }) => (
+		<Text size="sm" component="ol" mb="xs" style={{ paddingLeft: 20 }}>
+			{children}
+		</Text>
+	),
+	li: ({ children }) => (
+		<Text size="sm" component="li" mb={2}>
+			{children}
+		</Text>
+	),
+	code: ({ className, children }) =>
+		className ? (
+			<Box
+				component="pre"
+				p="xs"
+				mb="xs"
+				style={{
+					background: "var(--mantine-color-default-hover)",
+					borderRadius: 4,
+					overflow: "auto",
+				}}
+			>
+				<Text size="xs" component="code" style={{ whiteSpace: "pre" }}>
+					{children}
+				</Text>
+			</Box>
+		) : (
+			<Text
+				size="sm"
+				component="code"
+				style={{
+					background: "var(--mantine-color-default-hover)",
+					padding: "2px 6px",
+					borderRadius: 4,
+				}}
+			>
+				{children}
+			</Text>
+		),
+	strong: ({ children }) => (
+		<Text size="sm" component="strong" fw={700}>
+			{children}
+		</Text>
+	),
+	a: ({ href, children }) => (
+		<Anchor size="sm" href={href} target="_blank" rel="noopener noreferrer">
+			{children}
+		</Anchor>
+	),
+};
+
+/** Расширенная конфигурация для модального окна GigaChat (включает заголовки, таблицы и т.д.) */
+const extendedMarkdownComponents = {
+	...baseMarkdownComponents,
+	li: ({ children }) => (
+		<Text size="sm" component="li" mb={4}>
+			{children}
+		</Text>
+	),
+	h1: ({ children }) => (
+		<Title order={3} mb="sm" mt="md">
+			{children}
+		</Title>
+	),
+	h2: ({ children }) => (
+		<Title order={4} mb="xs" mt="sm">
+			{children}
+		</Title>
+	),
+	h3: ({ children }) => (
+		<Title order={5} mb="xs" mt="sm">
+			{children}
+		</Title>
+	),
+	blockquote: ({ children }) => (
+		<Text
+			size="sm"
+			component="blockquote"
+			c="dimmed"
+			style={{
+				borderLeft: "4px solid var(--mantine-color-default-border)",
+				paddingLeft: 12,
+				marginBottom: 8,
+			}}
+		>
+			{children}
+		</Text>
+	),
+	table: ({ children }) => (
+		<ScrollArea type="auto" mb="xs">
+			<Box
+				component="table"
+				style={{ borderCollapse: "collapse", width: "100%", fontSize: "var(--mantine-font-size-sm)" }}
+			>
+				{children}
+			</Box>
+		</ScrollArea>
+	),
+	thead: ({ children }) => <Box component="thead">{children}</Box>,
+	tbody: ({ children }) => <Box component="tbody">{children}</Box>,
+	tr: ({ children }) => (
+		<Box component="tr" style={{ borderBottom: "1px solid var(--mantine-color-default-border)" }}>
+			{children}
+		</Box>
+	),
+	th: ({ children }) => (
+		<Box component="th" style={{ textAlign: "left", padding: "8px 12px", fontWeight: 600 }}>
+			{children}
+		</Box>
+	),
+	td: ({ children }) => (
+		<Box component="td" style={{ padding: "8px 12px" }}>
+			{children}
+		</Box>
+	),
+};
 
 /** Переписывает img src в HTML описания на прокси-URL для загрузки с авторизацией Jira */
 function rewriteDescriptionHtmlImages(html, jiraBaseUrl, userId) {
@@ -181,7 +310,7 @@ async function expandDescriptionWithConfluence(descriptionText, sourceForUrls, u
 export function IssueDetails() {
 	const { issueKey } = useParams();
 	const navigate = useNavigate();
-	const { user, logout } = useAuth();
+	const { user } = useAuth();
 	const [issue, setIssue] = useState(null);
 	const [loading, setLoading] = useState(true);
 	const [error, setError] = useState(null);
@@ -267,26 +396,6 @@ export function IssueDetails() {
 		return () => el.removeEventListener("click", onDescClick);
 	}, [descriptionHtmlWithImages]);
 
-	const DEFAULT_SLOP_INSTRUCTIONS = `Ты senior-level системный аналитик. Вместе с этим текстом будет передана родительская задача для задачи из запроса пользователя. В запросе пользователя тебе будет переданы тип, номер, название и описание задачи.
-Используй все эти данные и профессионально перепиши задачу из пользовательского запроса.
-Никогда не запрашивай недостающую информацию и не пиши, что не можешь что-то описать. Просто пиши те рекомендации, в которых уверена.
-Если вместе с текстом не пришло содержимое Epic, то формируй ответ за основании этих инструкций и пользовательского запроса.
-Используй следующую структуру задачи:
-- номер задачи
-- название задачи
-- user story (кто, что , для чего)
-- use case (участники + порядок шагов)
-- sequence-диаграмма (в формате PlantUML)
-- функциональные требования
-- нефункциональные требования
-- ограничения
-- требования к пользовательскому интерфейсу
-- требования к базе данных (ERD-диаграммы в формате PlantUML)
-- требования к сохранению данных на S3
-- Контракты API (endpoint, назначение, состав запроса, состав ответа, ошибки и статусы запроса).
-Если для целей задачи не требуется заполнение какого-то из разделов - пропусти его.
-Для ответа используй markdown форматирование. Все разделы структуры выделяй заголовками второго уровня, если есть вложенные подразделы - их выделяй заголовками третьего уровня. Фрагменты кода и блоки plantuml выделяй как код.`;
-
 	const formatIssueForPrompt = (item) => {
 		const type = item.issueType?.name ?? "";
 		const key = item.key ?? "";
@@ -312,8 +421,8 @@ export function IssueDetails() {
 		try {
 			const settingsRes = await fetch(`http://localhost:3001/api/settings?userId=${user.id}`);
 			const settingsData = await settingsRes.json();
-			const instructions =
-				(settingsData.slopSystemPrompt && String(settingsData.slopSystemPrompt).trim()) || DEFAULT_SLOP_INSTRUCTIONS;
+			// Сервер возвращает значение по умолчанию если у пользователя нет настроек
+			const instructions = (settingsData.slopSystemPrompt && String(settingsData.slopSystemPrompt).trim()) || "";
 
 			const epicKey = issue.issueType?.name?.toLowerCase() === "epic" ? issue.key : issue.epicKey || null;
 
@@ -358,13 +467,11 @@ export function IssueDetails() {
 								issueType: epicResponseData.issueType,
 							};
 						}
-					} catch (epicErr) {
-						console.warn("Не удалось получить данные эпика:", epicErr);
-					}
+					} catch (epicErr) {}
 				}
 
 				if (epicData) {
-					systemPrompt += "\n\n" + formatIssueForPrompt(epicData);
+					systemPrompt += "\n\nРодительская задача/эпик:\n" + formatIssueForPrompt(epicData);
 				}
 			}
 			// Дополнительный контекст проекта: текстовое поле или страница Confluence
@@ -387,9 +494,7 @@ export function IssueDetails() {
 								systemPrompt += "\n\nИнформация о проекте: " + plainText;
 							}
 						}
-					} catch (confluenceErr) {
-						console.warn("Не удалось загрузить страницу Confluence:", confluenceErr);
-					}
+					} catch (confluenceErr) {}
 				}
 			} else {
 				const projectContext = settingsData.projectContext && String(settingsData.projectContext).trim();
@@ -425,7 +530,6 @@ export function IssueDetails() {
 
 			setSlopResponse(gigachatData.response || "Ответ не получен");
 		} catch (err) {
-			console.error("Ошибка при вызове Slop!:", err);
 			setSlopResponse(`Ошибка: ${err.message}`);
 			notifications.show({
 				title: "Ошибка",
@@ -548,15 +652,13 @@ export function IssueDetails() {
 		}
 	};
 
-	const handleLogout = () => {
-		logout();
-		navigate("/login");
-	};
-
 	const formatDate = (dateString) => {
 		if (!dateString) return "Не указано";
-		const date = new Date(dateString);
+		const s = String(dateString).trim();
+		const asUTC = !s.endsWith("Z") && !/[-+]\d{2}:?\d{2}$/.test(s) ? s.replace(" ", "T") + "Z" : s;
+		const date = new Date(asUTC);
 		return date.toLocaleString("ru-RU", {
+			timeZone: "Europe/Moscow",
 			year: "numeric",
 			month: "long",
 			day: "numeric",
@@ -569,57 +671,7 @@ export function IssueDetails() {
 		<Box
 			style={{ minHeight: "100vh", display: "flex", flexDirection: "column", width: "100vw", margin: 0, padding: 0 }}
 		>
-			{/* Верхняя панель */}
-			<Box
-				style={{
-					position: "fixed",
-					top: 0,
-					left: 0,
-					right: 0,
-					width: "100vw",
-					height: 70,
-					padding: "0 20px",
-					borderBottom: "1px solid #e9ecef",
-					display: "flex",
-					alignItems: "center",
-					justifyContent: "space-between",
-					backgroundColor: "white",
-					zIndex: 100,
-					boxSizing: "border-box",
-				}}
-			>
-				<Title order={2} c="violet" fw={700} style={{ cursor: "pointer" }} onClick={() => navigate("/dashboard")}>
-					VibeProject
-				</Title>
-				<Group gap="md" style={{ marginLeft: "auto" }}>
-					<Menu shadow="md" width={200} position="bottom-end">
-						<Menu.Target>
-							<Avatar
-								src={null}
-								alt={user?.email || "Пользователь"}
-								color="violet"
-								radius="xl"
-								style={{ cursor: "pointer" }}
-							>
-								{user?.email ? user.email.charAt(0).toUpperCase() : "U"}
-							</Avatar>
-						</Menu.Target>
-
-						<Menu.Dropdown>
-							<Menu.Label>
-								<Text size="sm" fw={500}>
-									{user?.email}
-								</Text>
-							</Menu.Label>
-							<Menu.Divider />
-							<Menu.Item onClick={() => navigate("/settings")}>Настройки</Menu.Item>
-							<Menu.Item color="red" onClick={handleLogout}>
-								Выйти
-							</Menu.Item>
-						</Menu.Dropdown>
-					</Menu>
-				</Group>
-			</Box>
+			<Header />
 
 			{/* Основной контент */}
 			<Box
@@ -1163,70 +1215,7 @@ export function IssueDetails() {
 																	lineHeight: 1.5,
 																}}
 															>
-																<ReactMarkdown
-																	remarkPlugins={[remarkGfm]}
-																	components={{
-																		p: ({ children }) => (
-																			<Text size="sm" mb="xs" component="p">
-																				{children}
-																			</Text>
-																		),
-																		ul: ({ children }) => (
-																			<Text size="sm" component="ul" mb="xs" style={{ paddingLeft: 20 }}>
-																				{children}
-																			</Text>
-																		),
-																		ol: ({ children }) => (
-																			<Text size="sm" component="ol" mb="xs" style={{ paddingLeft: 20 }}>
-																				{children}
-																			</Text>
-																		),
-																		li: ({ children }) => (
-																			<Text size="sm" component="li" mb={2}>
-																				{children}
-																			</Text>
-																		),
-																		code: ({ className, children }) =>
-																			className ? (
-																				<Box
-																					component="pre"
-																					p="xs"
-																					mb="xs"
-																					style={{
-																						background: "var(--mantine-color-default-hover)",
-																						borderRadius: 4,
-																						overflow: "auto",
-																					}}
-																				>
-																					<Text size="xs" component="code" style={{ whiteSpace: "pre" }}>
-																						{children}
-																					</Text>
-																				</Box>
-																			) : (
-																				<Text
-																					size="sm"
-																					component="code"
-																					style={{
-																						background: "var(--mantine-color-default-hover)",
-																						padding: "2px 6px",
-																						borderRadius: 4,
-																					}}
-																				>
-																					{children}
-																				</Text>
-																			),
-																		strong: ({ children }) => (
-																			<Text size="sm" component="strong" fw={700}>
-																				{children}
-																			</Text>
-																		),
-																		a: ({ href, children }) => (
-																			<Anchor size="sm" href={href} target="_blank" rel="noopener noreferrer">
-																				{children}
-																			</Anchor>
-																		),
-																	}}
-																>
+																<ReactMarkdown remarkPlugins={[remarkGfm]} components={baseMarkdownComponents}>
 																	{comment.bodyMarkdown || ""}
 																</ReactMarkdown>
 															</Box>
@@ -1279,122 +1268,7 @@ export function IssueDetails() {
 								lineHeight: 1.6,
 							}}
 						>
-							<ReactMarkdown
-								remarkPlugins={[remarkGfm]}
-								components={{
-									p: ({ children }) => (
-										<Text size="sm" mb="xs" component="p">
-											{children}
-										</Text>
-									),
-									h1: ({ children }) => (
-										<Title order={3} mb="sm" mt="md">
-											{children}
-										</Title>
-									),
-									h2: ({ children }) => (
-										<Title order={4} mb="xs" mt="sm">
-											{children}
-										</Title>
-									),
-									h3: ({ children }) => (
-										<Title order={5} mb="xs" mt="sm">
-											{children}
-										</Title>
-									),
-									ul: ({ children }) => (
-										<Text size="sm" component="ul" mb="xs" style={{ paddingLeft: 20 }}>
-											{children}
-										</Text>
-									),
-									ol: ({ children }) => (
-										<Text size="sm" component="ol" mb="xs" style={{ paddingLeft: 20 }}>
-											{children}
-										</Text>
-									),
-									li: ({ children }) => (
-										<Text size="sm" component="li" mb={4}>
-											{children}
-										</Text>
-									),
-									code: ({ className, children }) =>
-										className ? (
-											<Box
-												component="pre"
-												p="xs"
-												mb="xs"
-												style={{ background: "var(--mantine-color-default-hover)", borderRadius: 4, overflow: "auto" }}
-											>
-												<Text size="xs" component="code" style={{ whiteSpace: "pre" }}>
-													{children}
-												</Text>
-											</Box>
-										) : (
-											<Text
-												size="sm"
-												component="code"
-												style={{
-													background: "var(--mantine-color-default-hover)",
-													padding: "2px 6px",
-													borderRadius: 4,
-												}}
-											>
-												{children}
-											</Text>
-										),
-									blockquote: ({ children }) => (
-										<Text
-											size="sm"
-											component="blockquote"
-											c="dimmed"
-											style={{
-												borderLeft: "4px solid var(--mantine-color-default-border)",
-												paddingLeft: 12,
-												marginBottom: 8,
-											}}
-										>
-											{children}
-										</Text>
-									),
-									a: ({ href, children }) => (
-										<Anchor size="sm" href={href} target="_blank" rel="noopener noreferrer">
-											{children}
-										</Anchor>
-									),
-									strong: ({ children }) => (
-										<Text size="sm" component="strong" fw={700}>
-											{children}
-										</Text>
-									),
-									table: ({ children }) => (
-										<ScrollArea type="auto" mb="xs">
-											<Box
-												component="table"
-												style={{ borderCollapse: "collapse", width: "100%", fontSize: "var(--mantine-font-size-sm)" }}
-											>
-												{children}
-											</Box>
-										</ScrollArea>
-									),
-									thead: ({ children }) => <Box component="thead">{children}</Box>,
-									tbody: ({ children }) => <Box component="tbody">{children}</Box>,
-									tr: ({ children }) => (
-										<Box component="tr" style={{ borderBottom: "1px solid var(--mantine-color-default-border)" }}>
-											{children}
-										</Box>
-									),
-									th: ({ children }) => (
-										<Box component="th" style={{ textAlign: "left", padding: "8px 12px", fontWeight: 600 }}>
-											{children}
-										</Box>
-									),
-									td: ({ children }) => (
-										<Box component="td" style={{ padding: "8px 12px" }}>
-											{children}
-										</Box>
-									),
-								}}
-							>
+							<ReactMarkdown remarkPlugins={[remarkGfm]} components={extendedMarkdownComponents}>
 								{slopResponse || "—"}
 							</ReactMarkdown>
 						</Box>

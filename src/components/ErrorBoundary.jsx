@@ -16,7 +16,7 @@ export class ErrorBoundary extends Component {
 	}
 
 	componentDidCatch(error, errorInfo) {
-		console.error("ErrorBoundary поймал ошибку:", error, errorInfo);
+		// Ошибка уже отображена пользователю через state
 	}
 
 	handleRetry = () => {

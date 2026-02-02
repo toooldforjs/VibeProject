@@ -13,13 +13,40 @@ import {
 	Badge,
 	Collapse,
 	ActionIcon,
-	Avatar,
-	Menu,
 } from "@mantine/core";
+import { Header } from "../components/Header";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "../contexts/AuthContext";
 import { notifications } from "@mantine/notifications";
 import { getStatusColor, getIssueTypeColor } from "../utils/statusColors";
+
+// Вспомогательные функции для сортировки задач (вынесены на уровень модуля для оптимизации)
+
+/** Извлекает номер из ключа задачи (например, EPIC-123 -> 123) */
+const getIssueNumber = (key) => {
+	if (!key) return 0;
+	const match = key.match(/-(\d+)$/);
+	return match ? parseInt(match[1], 10) : 0;
+};
+
+/** Возвращает порядок цвета статуса для сортировки: gray=0, blue=1, green=2, red=3 */
+const getStatusColorOrder = (issueType, statusName) => {
+	const color = getStatusColor(issueType, statusName);
+	const colorOrder = { gray: 0, blue: 1, green: 2, red: 3 };
+	return colorOrder[color] || 0;
+};
+
+/** Сортирует задачи по цвету статуса, затем по номеру задачи */
+const sortTasksByStatusColor = (tasks) => {
+	return [...tasks].sort((a, b) => {
+		const colorOrderA = getStatusColorOrder(a.issueType.name, a.status.name);
+		const colorOrderB = getStatusColorOrder(b.issueType.name, b.status.name);
+		if (colorOrderA !== colorOrderB) {
+			return colorOrderA - colorOrderB;
+		}
+		return getIssueNumber(a.key) - getIssueNumber(b.key);
+	});
+};
 
 // Иконки развёрнут/свёрнут: плюс — свёрнут, минус — развёрнут (белые на синем фоне)
 const IconPlus = ({ size = 16, color = "white" }) => (
@@ -55,7 +82,7 @@ const IconMinus = ({ size = 16, color = "white" }) => (
 
 export function Dashboard() {
 	const navigate = useNavigate();
-	const { user, logout } = useAuth();
+	const { user } = useAuth();
 	const [settings, setSettings] = useState(null);
 	const [loadingSettings, setLoadingSettings] = useState(true);
 	const [loadingIssues, setLoadingIssues] = useState(false);
@@ -134,7 +161,6 @@ export function Dashboard() {
 				});
 			}
 		} catch (error) {
-			console.error("Ошибка загрузки настроек:", error);
 			setSettings({
 				projectTag: null,
 				jiraPat: null,
@@ -224,17 +250,6 @@ export function Dashboard() {
 			} catch (parseError) {
 				data = { raw: responseText };
 			}
-
-			// Логируем ответ для отладки
-			console.log("Jira API Response:", {
-				httpStatus: response.status,
-				jiraStatus: data.response?.status,
-				hasBody: !!data.body,
-				bodyType: typeof data.body,
-				bodyKeys: data.body ? Object.keys(data.body) : [],
-				isHtml: data.isHtml,
-				htmlError: data.htmlError,
-			});
 
 			if (!response.ok) {
 				throw {
@@ -357,11 +372,6 @@ export function Dashboard() {
 		} finally {
 			setLoadingIssues(false);
 		}
-	};
-
-	const handleLogout = () => {
-		logout();
-		navigate("/login");
 	};
 
 	// Обработка задач для построения иерархии
@@ -501,37 +511,6 @@ export function Dashboard() {
 				...task,
 				children: buildSubtaskHierarchy(task.key, issuesMap),
 			}));
-
-		// Функция для извлечения номера из ключа задачи (например, EPIC-123 -> 123)
-		const getIssueNumber = (key) => {
-			if (!key) return 0;
-			const match = key.match(/-(\d+)$/);
-			return match ? parseInt(match[1], 10) : 0;
-		};
-
-		// Функция для получения порядка цвета статуса для сортировки
-		const getStatusColorOrder = (issueType, statusName) => {
-			const color = getStatusColor(issueType, statusName);
-			// Порядок: gray (0), blue (1), green (2), red (3)
-			const colorOrder = { gray: 0, blue: 1, green: 2, red: 3 };
-			return colorOrder[color] || 0;
-		};
-
-		// Функция для сортировки задач по цвету статуса
-		const sortTasksByStatusColor = (tasks) => {
-			return [...tasks].sort((a, b) => {
-				const colorOrderA = getStatusColorOrder(a.issueType.name, a.status.name);
-				const colorOrderB = getStatusColorOrder(b.issueType.name, b.status.name);
-
-				// Сначала по цвету статуса
-				if (colorOrderA !== colorOrderB) {
-					return colorOrderA - colorOrderB;
-				}
-
-				// Если цвета одинаковые, сортируем по номеру задачи
-				return getIssueNumber(a.key) - getIssueNumber(b.key);
-			});
-		};
 
 		// Сортируем эпики по номеру
 		const sortedEpics = epics.sort((a, b) => {
@@ -782,57 +761,7 @@ export function Dashboard() {
 		<Box
 			style={{ minHeight: "100vh", display: "flex", flexDirection: "column", width: "100vw", margin: 0, padding: 0 }}
 		>
-			{/* Верхняя панель */}
-			<Box
-				style={{
-					position: "fixed",
-					top: 0,
-					left: 0,
-					right: 0,
-					width: "100vw",
-					height: 70,
-					padding: "0 20px",
-					borderBottom: "1px solid #e9ecef",
-					display: "flex",
-					alignItems: "center",
-					justifyContent: "space-between",
-					backgroundColor: "white",
-					zIndex: 100,
-					boxSizing: "border-box",
-				}}
-			>
-				<Title order={2} c="violet" fw={700} style={{ cursor: "pointer" }} onClick={() => navigate("/dashboard")}>
-					VibeProject
-				</Title>
-				<Group gap="md" style={{ marginLeft: "auto" }}>
-					<Menu shadow="md" width={200} position="bottom-end">
-						<Menu.Target>
-							<Avatar
-								src={null}
-								alt={user?.email || "Пользователь"}
-								color="violet"
-								radius="xl"
-								style={{ cursor: "pointer" }}
-							>
-								{user?.email ? user.email.charAt(0).toUpperCase() : "U"}
-							</Avatar>
-						</Menu.Target>
-
-						<Menu.Dropdown>
-							<Menu.Label>
-								<Text size="sm" fw={500}>
-									{user?.email}
-								</Text>
-							</Menu.Label>
-							<Menu.Divider />
-							<Menu.Item onClick={() => navigate("/settings")}>Настройки</Menu.Item>
-							<Menu.Item color="red" onClick={handleLogout}>
-								Выйти
-							</Menu.Item>
-						</Menu.Dropdown>
-					</Menu>
-				</Group>
-			</Box>
+			<Header />
 
 			{/* Основной контент */}
 			<Box

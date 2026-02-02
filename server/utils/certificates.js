@@ -39,9 +39,9 @@ export async function downloadRootCertificate() {
   ensureCertsDir();
 
   const certUrl = 'https://gu-st.ru/content/lending/russian_trusted_root_ca_pem.crt';
-  
+
   console.log('📥 Загрузка корневого сертификата Минцифры...');
-  
+
   return new Promise((resolve, reject) => {
     // При загрузке сертификата временно отключаем проверку сертификата,
     // так как сам сертификат нужен для проверки
