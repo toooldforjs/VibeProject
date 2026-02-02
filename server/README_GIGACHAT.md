@@ -41,13 +41,14 @@ GET /api/gigachat/status?userId=1
 Проверяет настройки GigaChat для пользователя. Данные берутся из БД (раздел Настройки).
 
 **Ответ** (передайте `userId` в query):
+
 ```json
 {
-  "hasCredentials": true,
-  "scope": "GIGACHAT_API_PERS",
-  "model": "GigaChat",
-  "timeout": 600,
-  "httpsAgentConfigured": true
+	"hasCredentials": true,
+	"scope": "GIGACHAT_API_PERS",
+	"model": "GigaChat",
+	"timeout": 600,
+	"httpsAgentConfigured": true
 }
 ```
 
@@ -65,12 +66,13 @@ Content-Type: application/json
 Получает токен доступа GigaChat по настройкам пользователя из БД. Токен действителен в течение 30 минут.
 
 **Ответ:**
+
 ```json
 {
-  "success": true,
-  "message": "Токен доступа успешно получен",
-  "scope": "GIGACHAT_API_PERS",
-  "expiresIn": "30 минут"
+	"success": true,
+	"message": "Токен доступа успешно получен",
+	"scope": "GIGACHAT_API_PERS",
+	"expiresIn": "30 минут"
 }
 ```
 
@@ -81,6 +83,7 @@ POST /api/gigachat/chat
 Content-Type: application/json
 
 {
+  "userId": 1,                // обязательно
   "message": "Привет, как дела?",
   "model": "GigaChat",        // опционально
   "temperature": 0.7,         // опционально
@@ -88,9 +91,10 @@ Content-Type: application/json
 }
 ```
 
-Отправляет сообщение в GigaChat и получает ответ.
+Отправляет сообщение в GigaChat и получает ответ. Параметр `userId` обязателен (настройки GigaChat берутся из БД по пользователю).
 
 **Ответ:**
+
 ```json
 {
   "success": true,
@@ -106,12 +110,13 @@ Content-Type: application/json
 ### Получение списка моделей
 
 ```bash
-GET /api/gigachat/models
+GET /api/gigachat/models?userId=1
 ```
 
-Получает список доступных моделей GigaChat.
+Получает список доступных моделей GigaChat. Параметр `userId` в query обязателен.
 
 **Ответ:**
+
 ```json
 {
   "success": true,
@@ -130,13 +135,14 @@ GET /api/gigachat/models
 ### Пример с curl
 
 ```bash
-# Проверка статуса
-curl http://localhost:3001/api/gigachat/status
+# Проверка статуса (передайте userId)
+curl "http://localhost:3001/api/gigachat/status?userId=1"
 
-# Отправка сообщения
+# Отправка сообщения (userId обязателен)
 curl -X POST http://localhost:3001/api/gigachat/chat \
   -H "Content-Type: application/json" \
   -d '{
+    "userId": 1,
     "message": "Расскажи про искусственный интеллект"
   }'
 ```
@@ -144,16 +150,17 @@ curl -X POST http://localhost:3001/api/gigachat/chat \
 ### Пример с JavaScript (fetch)
 
 ```javascript
-// Отправка сообщения
-const response = await fetch('http://localhost:3001/api/gigachat/chat', {
-  method: 'POST',
-  headers: {
-    'Content-Type': 'application/json',
-  },
-  body: JSON.stringify({
-    message: 'Привет, GigaChat!',
-    model: 'GigaChat',
-  }),
+// Отправка сообщения (userId обязателен)
+const response = await fetch("http://localhost:3001/api/gigachat/chat", {
+	method: "POST",
+	headers: {
+		"Content-Type": "application/json",
+	},
+	body: JSON.stringify({
+		userId: 1,
+		message: "Привет, GigaChat!",
+		model: "GigaChat",
+	}),
 });
 
 const data = await response.json();
@@ -177,11 +184,13 @@ console.log(data.response);
 ### Ошибка: "Ошибка получения токена доступа"
 
 **Возможные причины**:
+
 1. Неверный ключ авторизации
 2. Неверный scope
 3. Проблемы с сетью
 
 **Решение**:
+
 - Проверьте ключ авторизации и scope в **Настройках** приложения
 - Убедитесь, что используете правильный scope для вашего типа аккаунта
 - Проверьте интернет-соединение

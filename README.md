@@ -1,16 +1,23 @@
-# VibeProject
+﻿# VibeProject
 
-Приложение для аутентификации пользователей с использованием PostgreSQL в контейнере (через Podman).
+VibeProject - это упрощенный клиент для Jira, позволяющий обогатить твои задачи нейрослопом от GigaChat.
+Функции приложения:
 
-## Требования
+- получение перечня задач проекта или отдельной задачи из Jira;
+- добавление заметок к задачам в виде комментов;
+- генерация рекомендаций по составлению задач на разработку от GigaChat на основе описания задачи, эпика, системного промпта и контекста проекта.
+
+После запуска проекта нужно перейти в настройки в меню профиля и заполнить там параметры подключения к Jira и GigaChat + параметры запросов к GigaChat.
+
+# Требования
 
 - Node.js 18+
 - Podman (или Podman Desktop) с поддержкой `podman compose`
 - npm или yarn
 
-## Установка и запуск
+# Установка и запуск
 
-### Быстрый старт (запуск всех сервисов одной командой)
+## Быстрый старт (запуск всех сервисов одной командой)
 
 **Важно:** Перед запуском убедитесь, что Podman Desktop запущен и работает.
 
@@ -20,20 +27,17 @@ npm run dev:all
 ```
 
 Эта команда автоматически:
+
+- Установит все зависимости проекта
 - Запустит базу данных PostgreSQL в Podman
 - Запустит backend сервер на `http://localhost:3001`
 - Запустит frontend на `http://localhost:5173`
 
-**Если возникает ошибка "could not find a matching machine":**
-1. Запустите Podman Desktop из меню Пуск
-2. Дождитесь полной загрузки (иконка в системном трее должна быть активной)
-3. Попробуйте снова выполнить `npm run dev:all`
-
-### Ручной запуск (пошагово)
+## Ручной запуск (пошагово)
 
 ### 1. Запуск базы данных (через Podman)
 
-В корне проекта (`VibeProject`) выполните:
+В корне проекта выполните:
 
 ```bash
 podman compose up -d
@@ -56,8 +60,9 @@ npm install
 
 ### 3. Запуск backend сервера
 
+Из директории `server` (вы уже в ней после шага 2) выполните:
+
 ```bash
-cd server
 npm run dev
 ```
 
@@ -65,13 +70,16 @@ Backend будет доступен на `http://localhost:3001`
 
 ### 4. Установка зависимостей frontend
 
-В корневой директории проекта:
+Перейдите в корневую директорию проекта и установите зависимости:
 
 ```bash
+cd ..
 npm install
 ```
 
 ### 5. Запуск frontend
+
+В корневой директории проекта выполните (это другой `npm run dev` — запускается Vite, а не backend):
 
 ```bash
 npm run dev
@@ -87,50 +95,26 @@ Frontend будет доступен на `http://localhost:5173`
 - `npm run dev:backend` - только backend
 - `npm run dev` - только frontend
 
-## Структура проекта
+# Структура проекта
 
 ```
 VibeProject/
-├── server/              # Backend API
-│   ├── db/             # База данных
-│   ├── routes/         # API маршруты
-│   └── server.js       # Главный файл сервера
-├── src/                # Frontend React приложение
-│   ├── contexts/       # React контексты
-│   └── pages/          # Страницы приложения
-└── docker-compose.yml  # Конфигурация Docker
+├── server/              # Backend API
+│   ├── db/             # База данных
+│   ├── routes/         # API маршруты
+│   └── server.js       # Главный файл сервера
+├── src/                # Frontend React приложение
+│   ├── contexts/       # React контексты
+│   └── pages/          # Страницы приложения
+└── docker-compose.yml  # Конфигурация Docker
 ```
 
-## API Endpoints
+# База данных
 
-### POST /api/auth/register
-Регистрация нового пользователя
-
-**Body:**
-```json
-{
-  "email": "user@example.com",
-  "password": "password123"
-}
-```
-
-### POST /api/auth/login
-Вход пользователя
-
-**Body:**
-```json
-{
-  "email": "user@example.com",
-  "password": "password123"
-}
-```
-
-## База данных
-
-PostgreSQL запускается в контейнере Podman на основе `docker-compose.yml` (Podman понимает этот формат).
+PostgreSQL запускается в контейнере Podman на основе `docker-compose.yml`.
 Данные сохраняются в volume `postgres_data`, который создаётся Podman автоматически.
-
 **Параметры подключения:**
+
 - Host: localhost
 - Port: 5432
 - User: vibe_user
@@ -139,7 +123,42 @@ PostgreSQL запускается в контейнере Podman на основ
 
 Если вы меняете порт/пользователя/пароль в `docker-compose.yml`, не забудьте обновить файл `server/.env`.
 
-## Шифрование настроек GigaChat
+# Переменные окружения (server/.env)
+
+Используются только следующие переменные окружения:
+
+- `DB_HOST`, `DB_PORT`, `DB_USER`, `DB_PASSWORD`, `DB_NAME` — подключение к PostgreSQL
+- `PORT` — порт сервера (по умолчанию 3001)
+- `ENCRYPTION_KEY` — ключ шифрования для Jira PAT и GigaChat в БД (минимум 16 символов)
+- `JIRA_API_VERSION` — опционально: `3` для Jira Cloud API v3
+
+Переменные **JIRA_BASE_URL**, **JIRA_EMAIL**, **JIRA_API_TOKEN**, **JIRA_USE_PAT**, **GIGACHAT_CREDENTIALS**, **GIGACHAT_SCOPE**, **GIGACHAT_MODEL**, **GIGACHAT_TIMEOUT** не определены в коде или .env.
+Подключение к Jira и GigaChat настраиваются в приложении (страница Настройки в меню профиля), данные хранятся в БД в зашифрованном виде.
+Пример минимального `server/.env` см. в `server/.env.example`.
+
+# Интеграция с Jira
+
+Подключение к Jira настраивается в приложении в разделе "Настройки".
+Заполните:
+
+- тег проекта (например, GGBLOCKS),
+- PAT (Personal Access Token),
+- Base URL (основой URL-адрес Jira).
+  PAT - персональный токен доступа. Получить его можно в своем профиле в Jira в разделе "Personal Access Tokens".
+  Данные сохраняются в БД в зашифрованном виде.
+
+# Интеграция с GigaChat
+
+Подключение к GigaChat настраивается в приложении в разделе "Настройки".
+Заполните:
+
+- Ключ авторизации (получите персональный на developers.sber.ru),
+- Версия API (если токен персональный - GIGACHAT_API_PERS),
+- Модель (лучше GigaChat-2-Max),
+- Таймаут подключения в секундах.
+  В разделе "Системный промпт для GigaChat" заполните 2 поля как описано на странице настроек.
+
+# Шифрование настроек GigaChat
 
 Ключ GigaChat и параметры (scope, model, timeout) сохраняются в БД в зашифрованном виде. Для работы шифрования в `server/.env` задайте:
 
@@ -148,52 +167,3 @@ ENCRYPTION_KEY=ваш-секретный-ключ-минимум-16-символ
 ```
 
 Без `ENCRYPTION_KEY` сохранение настроек GigaChat в Настройках вернёт ошибку.
-
-## Переменные окружения (server/.env)
-
-Используются только следующие переменные (остальные в `.env` не читаются):
-
-| Переменная        | Описание |
-|-------------------|----------|
-| `DB_HOST`, `DB_PORT`, `DB_USER`, `DB_PASSWORD`, `DB_NAME` | Подключение к PostgreSQL |
-| `PORT`            | Порт сервера (по умолчанию 3001) |
-| `ENCRYPTION_KEY`  | Ключ шифрования для Jira PAT и GigaChat в БД (минимум 16 символов) |
-| `JIRA_API_VERSION` | Опционально: `3` для Jira Cloud API v3 |
-
-Переменные **JIRA_BASE_URL**, **JIRA_EMAIL**, **JIRA_API_TOKEN**, **JIRA_USE_PAT**, **GIGACHAT_CREDENTIALS**, **GIGACHAT_SCOPE**, **GIGACHAT_MODEL**, **GIGACHAT_TIMEOUT** в коде не используются — Jira и GigaChat настраиваются в приложении (страница Настройки), данные хранятся в БД в зашифрованном виде. Их можно удалить из `server/.env`.
-
-Пример минимального `server/.env` см. в `server/.env.example`.
-
-## Интеграция с Jira
-
-Jira настраивается в приложении: **Настройки** → тег проекта, PAT (Personal Access Token), Base URL. Данные сохраняются в БД в зашифрованном виде.
-
-### API Endpoints Jira
-
-#### GET /api/jira/auth
-Проверка авторизации в Jira API.
-
-**Ответ:**
-```json
-{
-  "request": {
-    "url": "https://...",
-    "method": "GET",
-    "authType": "Bearer (PAT)",
-    "headers": {...}
-  },
-  "response": {
-    "status": 200,
-    "statusText": "OK",
-    "contentType": "application/json",
-    "headers": {...}
-  },
-  "body": {
-    "self": "...",
-    "accountId": "...",
-    "displayName": "...",
-    ...
-  },
-  "rawBody": "..."
-}
-```
