@@ -631,6 +631,41 @@ router.get('/issue/:issueKey', async (req, res) => {
       mimeType: att.mimeType,
     }));
 
+    // Получаем ссылки на страницы Confluence (remote links)
+    let confluenceLinks = [];
+    try {
+      const remotelinkPath = apiVersion === '3' ? '/rest/api/3/issue/' : '/rest/api/2/issue/';
+      const remotelinkUrl = `${baseUrl}${remotelinkPath}${encodeURIComponent(issueKey)}/remotelink`;
+      const rlResponse = await fetch(remotelinkUrl, {
+        method: 'GET',
+        headers: {
+          'Authorization': authHeader,
+          'Accept': 'application/json',
+          'X-Atlassian-Token': 'no-check',
+        },
+      });
+      if (rlResponse.ok) {
+        const rlData = await rlResponse.json();
+        const links = Array.isArray(rlData) ? rlData : (rlData.values || rlData.results || []);
+        confluenceLinks = links
+          .filter((link) => {
+            const url = link.object?.url || '';
+            const appType = (link.application?.type || '').toLowerCase();
+            return (
+              (url.includes('viewpage.action') && url.includes('pageId=')) ||
+              appType.includes('confluence')
+            );
+          })
+          .map((link) => ({
+            url: link.object?.url || '',
+            title: link.object?.title || 'Страница Confluence',
+          }))
+          .filter((item) => item.url);
+      }
+    } catch (remotelinkError) {
+      console.error('Ошибка получения remote links (Confluence):', remotelinkError);
+    }
+
     const issueData = {
       key: issue.key,
       summary: fields.summary,
@@ -670,6 +705,7 @@ router.get('/issue/:issueKey', async (req, res) => {
       } : null,
       attachments: fileLinks,
       subtasks: subtaskLinks,
+      confluenceLinks,
       url: `${baseUrl}/browse/${issue.key}`,
       jiraBaseUrl: baseUrl,
     };
@@ -679,7 +715,7 @@ router.get('/issue/:issueKey', async (req, res) => {
       try {
         // Извлекаем project key из ключа задачи (например, GGBLOCKS-2 -> GGBLOCKS)
         const projectKey = issue.key.split('-')[0];
-        
+
         // Используем JQL для поиска задач, связанных с этим эпиком через "Epic Link"
         const jql = `project = ${projectKey} AND "Epic Link" = ${issue.key} ORDER BY summary ASC`;
         const searchUrl = `${baseUrl}/rest/api/2/search`;

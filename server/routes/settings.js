@@ -19,13 +19,13 @@ router.get('/', async (req, res) => {
     const userId = getUserId(req);
 
     if (!userId) {
-      return res.status(400).json({ 
-        error: 'User ID is required' 
+      return res.status(400).json({
+        error: 'User ID is required'
       });
     }
 
     const result = await pool.query(
-      'SELECT project_tag, jira_pat, jira_base_url, gigachat_credentials, gigachat_scope, gigachat_model, gigachat_timeout, slop_system_prompt, project_context FROM user_settings WHERE user_id = $1',
+      'SELECT project_tag, jira_pat, jira_base_url, gigachat_credentials, gigachat_scope, gigachat_model, gigachat_timeout, slop_system_prompt, project_context, project_context_type, project_context_confluence_url, confluence_username, confluence_password FROM user_settings WHERE user_id = $1',
       [userId]
     );
 
@@ -44,6 +44,10 @@ router.get('/', async (req, res) => {
         jiraBaseUrl: null,
         slopSystemPrompt: null,
         projectContext: null,
+        projectContextType: 'confluence',
+        projectContextConfluenceUrl: null,
+        confluenceUsername: null,
+        confluencePassword: null,
         ...gigachatFromDb(null),
       });
     }
@@ -55,12 +59,16 @@ router.get('/', async (req, res) => {
       jiraBaseUrl: settings.jira_base_url,
       slopSystemPrompt: settings.slop_system_prompt ?? null,
       projectContext: settings.project_context ?? null,
+      projectContextType: settings.project_context_type ?? 'confluence',
+      projectContextConfluenceUrl: settings.project_context_confluence_url ?? null,
+      confluenceUsername: settings.confluence_username ?? null,
+      confluencePassword: settings.confluence_password ? '••••••••••••' : null,
       ...gigachatFromDb(settings),
     });
   } catch (error) {
     console.error('Ошибка получения настроек:', error);
-    res.status(500).json({ 
-      error: 'Внутренняя ошибка сервера' 
+    res.status(500).json({
+      error: 'Внутренняя ошибка сервера'
     });
   }
 });
@@ -69,11 +77,11 @@ router.get('/', async (req, res) => {
 router.post('/', async (req, res) => {
   try {
     const userId = getUserId(req);
-    const { projectTag, jiraPat, jiraBaseUrl, gigachatCredentials, gigachatScope, gigachatModel, gigachatTimeout, slopSystemPrompt, projectContext } = req.body;
+    const { projectTag, jiraPat, jiraBaseUrl, gigachatCredentials, gigachatScope, gigachatModel, gigachatTimeout, slopSystemPrompt, projectContext, projectContextType, projectContextConfluenceUrl, confluenceUsername, confluencePassword } = req.body;
 
     if (!userId) {
-      return res.status(400).json({ 
-        error: 'User ID is required' 
+      return res.status(400).json({
+        error: 'User ID is required'
       });
     }
 
@@ -111,6 +119,25 @@ router.post('/', async (req, res) => {
       }
     }
 
+    // confluencePasswordNewValue: undefined = не менять, null = очистить, string = зашифрованные данные
+    let confluencePasswordNewValue = undefined;
+    if (confluencePassword !== undefined && confluencePassword !== null) {
+      if (confluencePassword === '' || (typeof confluencePassword === 'string' && confluencePassword.trim() === '')) {
+        confluencePasswordNewValue = null;
+      } else if (String(confluencePassword).trim() !== '••••••••••••') {
+        try {
+          confluencePasswordNewValue = encrypt(String(confluencePassword).trim());
+        } catch (encErr) {
+          return res.status(400).json({
+            error: 'Ошибка шифрования пароля Confluence',
+            message: process.env.ENCRYPTION_KEY ? encErr.message : 'Задайте ENCRYPTION_KEY в .env на сервере (минимум 16 символов)',
+          });
+        }
+      }
+    }
+
+    const confluenceUsernameVal = confluenceUsername !== undefined && confluenceUsername !== null && String(confluenceUsername).trim() !== '' ? String(confluenceUsername).trim() : null;
+
     const gigachatScopeVal = gigachatScope !== undefined && gigachatScope !== null && String(gigachatScope).trim() !== '' ? String(gigachatScope).trim() : null;
     const gigachatModelVal = gigachatModel !== undefined && gigachatModel !== null && String(gigachatModel).trim() !== '' ? String(gigachatModel).trim() : null;
     const gigachatTimeoutVal = gigachatTimeout !== undefined && gigachatTimeout !== null && String(gigachatTimeout).trim() !== '' ? parseInt(String(gigachatTimeout).trim(), 10) : null;
@@ -129,6 +156,12 @@ router.post('/', async (req, res) => {
       slopSystemPrompt !== undefined && slopSystemPrompt !== null ? String(slopSystemPrompt) : null;
     const projectContextVal =
       projectContext !== undefined && projectContext !== null ? String(projectContext) : null;
+    const projectContextTypeVal =
+      projectContextType === 'text' ? 'text' : 'confluence';
+    const projectContextConfluenceUrlVal =
+      projectContextConfluenceUrl !== undefined && projectContextConfluenceUrl !== null && String(projectContextConfluenceUrl).trim() !== ''
+        ? String(projectContextConfluenceUrl).trim()
+        : null;
 
     if (existing.rows.length > 0) {
       await pool.query(
@@ -152,6 +185,18 @@ router.post('/', async (req, res) => {
           [projectContextVal, userId]
         );
       }
+      if (projectContextType !== undefined) {
+        await pool.query(
+          'UPDATE user_settings SET project_context_type = $1, updated_at = CURRENT_TIMESTAMP WHERE user_id = $2',
+          [projectContextTypeVal, userId]
+        );
+      }
+      if (projectContextConfluenceUrl !== undefined) {
+        await pool.query(
+          'UPDATE user_settings SET project_context_confluence_url = $1, updated_at = CURRENT_TIMESTAMP WHERE user_id = $2',
+          [projectContextConfluenceUrlVal, userId]
+        );
+      }
       if (jiraPatNewValue !== undefined) {
         await pool.query(
           'UPDATE user_settings SET jira_pat = $1, updated_at = CURRENT_TIMESTAMP WHERE user_id = $2',
@@ -164,11 +209,23 @@ router.post('/', async (req, res) => {
           [credentialsNewValue, userId]
         );
       }
+      if (confluenceUsername !== undefined) {
+        await pool.query(
+          'UPDATE user_settings SET confluence_username = $1, updated_at = CURRENT_TIMESTAMP WHERE user_id = $2',
+          [confluenceUsernameVal, userId]
+        );
+      }
+      if (confluencePasswordNewValue !== undefined) {
+        await pool.query(
+          'UPDATE user_settings SET confluence_password = $1, updated_at = CURRENT_TIMESTAMP WHERE user_id = $2',
+          [confluencePasswordNewValue, userId]
+        );
+      }
     } else {
       await pool.query(
-        `INSERT INTO user_settings (user_id, project_tag, jira_pat, jira_base_url, gigachat_credentials, gigachat_scope, gigachat_model, gigachat_timeout, slop_system_prompt, project_context)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
-        [userId, projectTag || null, jiraPatForInsert, jiraBaseUrl || null, credentialsNewValue ?? null, gigachatScopeVal, gigachatModelVal, gigachatTimeoutVal, slopSystemPromptVal, projectContextVal]
+        `INSERT INTO user_settings (user_id, project_tag, jira_pat, jira_base_url, gigachat_credentials, gigachat_scope, gigachat_model, gigachat_timeout, slop_system_prompt, project_context, project_context_type, project_context_confluence_url, confluence_username, confluence_password)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)`,
+        [userId, projectTag || null, jiraPatForInsert, jiraBaseUrl || null, credentialsNewValue ?? null, gigachatScopeVal, gigachatModelVal, gigachatTimeoutVal, slopSystemPromptVal, projectContextVal, projectContextTypeVal, projectContextConfluenceUrlVal, confluenceUsernameVal ?? null, confluencePasswordNewValue ?? null]
       );
     }
 
@@ -186,8 +243,8 @@ router.post('/', async (req, res) => {
     });
   } catch (error) {
     console.error('Ошибка сохранения настроек:', error);
-    res.status(500).json({ 
-      error: 'Внутренняя ошибка сервера' 
+    res.status(500).json({
+      error: 'Внутренняя ошибка сервера'
     });
   }
 });

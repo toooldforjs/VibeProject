@@ -83,6 +83,16 @@ export async function initDatabase() {
     await pool.query(`
       ALTER TABLE user_settings ADD COLUMN IF NOT EXISTS project_context TEXT;
     `);
+    await pool.query(`
+      ALTER TABLE user_settings ADD COLUMN IF NOT EXISTS project_context_type VARCHAR(20);
+    `);
+    await pool.query(`
+      ALTER TABLE user_settings ADD COLUMN IF NOT EXISTS project_context_confluence_url TEXT;
+    `);
+    await pool.query(`
+      ALTER TABLE user_settings ADD COLUMN IF NOT EXISTS confluence_username VARCHAR(255);
+      ALTER TABLE user_settings ADD COLUMN IF NOT EXISTS confluence_password TEXT;
+    `);
 
     console.log('✅ Таблица user_settings создана/проверена');
 
