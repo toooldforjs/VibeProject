@@ -237,6 +237,7 @@ export function Settings() {
 
 						{!loading && (
 							<>
+								<Title order={3}>Интеграция с Jira</Title>
 								<TextInput
 									label="Тег проекта"
 									placeholder="Например: GGBLOCKS"
@@ -244,7 +245,6 @@ export function Settings() {
 									onChange={(e) => setFormData({ ...formData, projectTag: e.target.value })}
 									disabled={loading || saving}
 								/>
-
 								<TextInput
 									label="PAT (Personal Access Token) Jira"
 									placeholder="Введите ваш Personal Access Token"
@@ -254,7 +254,6 @@ export function Settings() {
 									disabled={loading || saving}
 									description="API Token из Jira. Создайте его в настройках аккаунта Jira: Account Settings → Security → API tokens"
 								/>
-
 								<TextInput
 									label="Base URL Jira"
 									placeholder="https://your-company.atlassian.net"
@@ -264,13 +263,9 @@ export function Settings() {
 									description="Базовый URL вашего Jira (например: https://your-company.atlassian.net)"
 								/>
 
-								<Divider my="lg" />
-
-								<Title order={4}>GigaChat API</Title>
-								<Text size="sm" c="dimmed" mb="xs">
-									Ключ и параметры сохраняются в БД в зашифрованном виде и используются при запросах к GigaChat (Slop! и
-									др.).
-								</Text>
+								<Title order={3} mt="md">
+									Интеграция с GigaChat
+								</Title>
 								<TextInput
 									label="Ключ авторизации (GIGACHAT_CREDENTIALS)"
 									placeholder="Введите ключ из личного кабинета Studio"
@@ -319,13 +314,9 @@ export function Settings() {
 									description="Таймаут подключения в секундах"
 								/>
 
-								<Divider my="lg" />
-
-								<Title order={4}>Системный промпт для GigaChat</Title>
-								<Text size="sm" c="dimmed" mb="xs">
-									Инструкции, которые подставляются в системный промпт при нажатии кнопки Slop! на задаче. Если у задачи
-									есть родительский эпик, после инструкций в промпт будет добавлено содержимое эпика.
-								</Text>
+								<Title order={3} mt="md">
+									Системный промпт GigaChat
+								</Title>
 								<Textarea
 									label="Инструкции системного промпта"
 									placeholder="Ты senior-level системный аналитик. В запросе пользователя тебе будет передано название и описание задачи на разработку. Сформулируй предложения по написанию текста задачи или составлению его с нуля."
@@ -334,14 +325,34 @@ export function Settings() {
 									disabled={loading || saving}
 									minRows={4}
 									autosize
+									description="Подставляются в системный промпт при нажатии Slop! на задаче. Если у задачи есть родительский эпик, после инструкций в промпт добавляется содержимое эпика."
 								/>
 
-								<Title order={5} mt="xs">
+								<Title order={3} mt="md">
+									Интеграция с Confluence
+								</Title>
+								<TextInput
+									label="Confluence логин"
+									placeholder="Логин для Confluence (on-prem)"
+									value={formData.confluenceUsername}
+									onChange={(e) => setFormData({ ...formData, confluenceUsername: e.target.value })}
+									disabled={loading || saving}
+								/>
+								<TextInput
+									label="Confluence пароль"
+									placeholder="Пароль или API-токен"
+									type="password"
+									value={formData.confluencePassword}
+									onChange={(e) => setFormData({ ...formData, confluencePassword: e.target.value })}
+									disabled={loading || saving}
+									description="Оставьте пустым или •••• чтобы не менять сохранённый пароль"
+								/>
+
+								<Title order={3} mt="md">
 									Дополнительный контекст проекта
 								</Title>
 								<Text size="sm" c="dimmed" mb="xs">
-									Глоссарий и описание проекта, которое поможет нейросети правильно интерпретировать запросы в задачах
-									(подставляется в запрос при нажатии Slop!).
+									Глоссарий и описание проекта для нейросети (подставляется в запрос при нажатии Slop!).
 								</Text>
 								<Select
 									label="Источник контекста"
@@ -375,23 +386,6 @@ export function Settings() {
 										description="URL страницы в Confluence. При нажатии Slop! в запрос будет подставлено содержимое этой страницы."
 									/>
 								)}
-
-								<TextInput
-									label="Confluence логин"
-									placeholder="Логин для Confluence (on-prem)"
-									value={formData.confluenceUsername}
-									onChange={(e) => setFormData({ ...formData, confluenceUsername: e.target.value })}
-									disabled={loading || saving}
-								/>
-								<TextInput
-									label="Confluence пароль"
-									placeholder="Пароль или API-токен"
-									type="password"
-									value={formData.confluencePassword}
-									onChange={(e) => setFormData({ ...formData, confluencePassword: e.target.value })}
-									disabled={loading || saving}
-									description="Оставьте пустым или •••• чтобы не менять сохранённый пароль"
-								/>
 
 								<Group justify="flex-end" mt="md">
 									<Button variant="light" onClick={() => navigate("/dashboard")} disabled={saving}>

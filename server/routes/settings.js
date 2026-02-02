@@ -4,6 +4,26 @@ import { encrypt, decrypt } from '../utils/encryption.js';
 
 const router = express.Router();
 
+// Значение по умолчанию для «Инструкции системного промпта» для нового пользователя
+const DEFAULT_SLOP_SYSTEM_PROMPT = `Ты senior-level системный аналитик. Вместе с этим текстом будет передана родительская задача для задачи из запроса пользователя. В запросе пользователя тебе будет переданы тип, номер, название и описание задачи.
+Используй все эти данные и профессионально перепиши задачу из пользовательского запроса.
+Никогда не запрашивай недостающую информацию и не пиши, что не можешь что-то описать. Просто пиши те рекомендации, в которых уверена.
+Если вместе с текстом не пришло содержимое Epic, то формируй ответ за основании этих инструкций и пользовательского запроса.
+Используй следующую структуру задачи:
+- номер задачи
+- название задачи
+- user story (кто, что , для чего)
+- use case (участники + порядок шагов)
+- sequence-диаграмма (в формате PlantUML)
+- функциональные требования
+- нефункциональные требования
+- ограничения
+- требования к пользовательскому интерфейсу
+- требования к базе данных (ERD-диаграммы в формате PlantUML)
+- требования к сохранению данных на S3
+- Контракты API (endpoint, назначение, состав запроса, состав ответа, ошибки и статусы запроса).
+Если для целей задачи не требуется заполнение какого-то из разделов - пропусти его.`;
+
 // Middleware для получения user_id из запроса
 // В реальном приложении здесь должна быть проверка токена/сессии
 // Для упрощения используем userId из body или query
@@ -42,7 +62,7 @@ router.get('/', async (req, res) => {
         projectTag: null,
         jiraPat: null,
         jiraBaseUrl: null,
-        slopSystemPrompt: null,
+        slopSystemPrompt: DEFAULT_SLOP_SYSTEM_PROMPT,
         projectContext: null,
         projectContextType: 'confluence',
         projectContextConfluenceUrl: null,
@@ -222,10 +242,11 @@ router.post('/', async (req, res) => {
         );
       }
     } else {
+      const slopPromptForInsert = (slopSystemPromptVal != null && String(slopSystemPromptVal).trim() !== '') ? slopSystemPromptVal : DEFAULT_SLOP_SYSTEM_PROMPT;
       await pool.query(
         `INSERT INTO user_settings (user_id, project_tag, jira_pat, jira_base_url, gigachat_credentials, gigachat_scope, gigachat_model, gigachat_timeout, slop_system_prompt, project_context, project_context_type, project_context_confluence_url, confluence_username, confluence_password)
          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)`,
-        [userId, projectTag || null, jiraPatForInsert, jiraBaseUrl || null, credentialsNewValue ?? null, gigachatScopeVal, gigachatModelVal, gigachatTimeoutVal, slopSystemPromptVal, projectContextVal, projectContextTypeVal, projectContextConfluenceUrlVal, confluenceUsernameVal ?? null, confluencePasswordNewValue ?? null]
+        [userId, projectTag || null, jiraPatForInsert, jiraBaseUrl || null, credentialsNewValue ?? null, gigachatScopeVal, gigachatModelVal, gigachatTimeoutVal, slopPromptForInsert, projectContextVal, projectContextTypeVal, projectContextConfluenceUrlVal, confluenceUsernameVal ?? null, confluencePasswordNewValue ?? null]
       );
     }
 

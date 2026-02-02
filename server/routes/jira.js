@@ -35,6 +35,12 @@ const normalizeBaseUrl = (url) => {
   return url.replace(/\/+$/, '');
 };
 
+// Ключ проекта для JQL: только буквы, цифры, дефис (стандартный формат Jira)
+const sanitizeProjectKeyForJql = (key) => {
+  if (!key || typeof key !== 'string') return '';
+  return key.trim().replace(/[^A-Za-z0-9\-]/g, '');
+};
+
 // Проверка авторизации в Jira API
 router.get('/auth', async (req, res) => {
   try {
@@ -229,12 +235,13 @@ router.get('/issues', async (req, res) => {
     // Получаем userId из query параметров
     const userId = req.query.userId;
 
-    // Получаем тег проекта из query параметров
-    const projectKey = req.query.projectKey;
+    // Получаем ключ проекта из query (в настройках хранится как «Тег проекта»)
+    const rawProjectKey = req.query.projectKey;
+    const projectKey = sanitizeProjectKeyForJql(rawProjectKey);
 
-    if (!projectKey || !projectKey.trim()) {
+    if (!projectKey) {
       return res.status(400).json({
-        error: 'Project key is required. Please provide projectKey query parameter.'
+        error: 'Project key is required. Please provide projectKey query parameter (only letters, numbers, hyphen).'
       });
     }
 
@@ -273,8 +280,8 @@ router.get('/issues', async (req, res) => {
       });
     }
 
-    // JQL запрос для получения всех задач проекта
-    const jql = `project = "${projectKey.trim()}" ORDER BY created DESC`;
+    // JQL: ключ проекта без кавычек (как в запросах по эпикам), чтобы избежать ошибки «value does not exist for the field project»
+    const jql = `project = ${projectKey} ORDER BY created DESC`;
 
     // Для Jira Server/Data Center используем POST запрос с телом (более надежно)
     // Пробуем разные версии API
